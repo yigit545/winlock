@@ -16,7 +16,7 @@ namespace fs = std::filesystem;
 const std::string ADMIN_PASSWORD = "admin123"; // the password to unlock the files during countdown
 const std::string TARGET_PATH = "./"; // the directory to lock files in "./" means the current directory
 const int LOCK_DURATION_SECONDS = 300;           // lock duration in seconds
-const std::string CRYPTO_KEY = "Hizli_XOR_Anahtari_2026";
+const std::string CRYPTO_KEY = "Fast_XOR_Key_2026"; // the key used for XOR encryption/decryption
 const char* REG_APP_KEY = "Software\\TimedFileLock"; // Registry key to store the end time of the lock
 // ==========================================
 
