@@ -107,7 +107,7 @@ int main() {
     if (endTime == 0) {
         endTime = now + LOCK_DURATION_SECONDS;
         setAutostartAndTimer(endTime);
-        processFiles(true); // Dosyaları şifrele
+        processFiles(true); // encrypt files
         std::cout << "Files locked and system integrated with startup!\n\n";
     } else {
         std::cout << "previous lock session detected, resuming from where it left off...\n\n";
@@ -120,7 +120,7 @@ int main() {
     std::string statusMsg = "";
     bool isUnlocked = false;
 
-    // Geri Sayım Döngüsü
+    // countdown loop
     while (remaining > 0 && !isUnlocked) {
         if (_kbhit()) {
             char ch = _getch();
@@ -156,10 +156,10 @@ int main() {
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
 
-    // Kilidi Aç ve Temizle
+    // unlock and clean
     std::cout << "\n\nUNLOCKING...\n";
-    processFiles(false); // Dosyaları deşifre et
-    cleanRegistrySettings(); // Programın otomatik başlama ve zaman verilerini sil
+    processFiles(false); // decrypt the files
+    cleanRegistrySettings(); // clean the auto-start and time data has left
     std::cout << "All files decrypted and system cleaned!\n";
 
     std::this_thread::sleep_for(std::chrono::seconds(3));
