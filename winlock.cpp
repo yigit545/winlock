@@ -10,7 +10,7 @@
 
 namespace fs = std::filesystem;
 
-// İşletim sistemine göre kütüphane seçimi
+// Select library according to the operating system
 #ifdef _WIN32
     #include <conio.h>
     #include <windows.h>
@@ -46,7 +46,7 @@ bool kbhit() {
 }
 #endif
 
-// Dosyanın üzerini sıfırlarla kaplayıp diskten güvenli şekilde siler
+// Overwrite the file with zeros and securely delete it from disk
 bool secureDelete(const fs::path& filePath) {
     std::error_code ec;
     uintmax_t fileSize = fs::file_size(filePath, ec);
@@ -88,10 +88,10 @@ void processSingleFile(const fs::path& filePath, bool encrypt) {
         outFile.close();
         
         if (encrypt) {
-            // Şifrelerken orijinal açık dosyayı güvenli şekilde sil
+            // When encrypting, securely delete the original unencrypted file
             secureDelete(filePath);
         } else {
-            // Şifre çözerken .locked uzantılı dosyayı standart sil
+            // When decrypting, delete the .locked file normally
             fs::remove(filePath);
         }
     }
@@ -111,7 +111,7 @@ void processFiles(bool encrypt) {
     }
 }
 
-// Süre bittiğinde kilitli tüm dosyaları imha eder
+// When the time runs out, permanently delete all locked files
 void destroyLockedFiles() {
     if (!fs::exists(TARGET_PATH)) return;
 
@@ -126,9 +126,9 @@ void destroyLockedFiles() {
 }
 
 int main() {
-    std::cout << "--- SURELI DOSYA KILIT SISTEMI ---\n";
+    std::cout << "--- TIME-LIMITED FILE LOCK SYSTEM ---\n";
     processFiles(true);
-    std::cout << "Dosyalar kilitlendi! ('.locked' uzantisi eklendi)\n\n";
+    std::cout << "Files locked! ('.locked' extension added)\n\n";
 
 #ifndef _WIN32
     setTerminalMode(false);
@@ -142,7 +142,7 @@ int main() {
     auto lastTick = std::chrono::steady_clock::now();
 
     while (remaining > 0 && !isUnlocked) {
-        // Klavyeden Girdi Kontrolü
+        // Read keyboard input
 #ifdef _WIN32
         if (_kbhit()) {
             char ch = _getch();
@@ -155,7 +155,7 @@ int main() {
                     isUnlocked = true;
                     break;
                 } else {
-                    statusMsg = " [HATALI SIFRE!]";
+                    statusMsg = " [INVALID PASSWORD!]";
                     inputBuffer.clear();
                 }
             } else if (ch == 127 || ch == '\b') {
@@ -168,19 +168,19 @@ int main() {
             }
         }
 
-        // Geri Sayım Zamanlayıcısı
+        // Countdown timer
         auto now = std::chrono::steady_clock::now();
         if (std::chrono::duration_cast<std::chrono::seconds>(now - lastTick).count() >= 1) {
             remaining--;
             lastTick = now;
         }
 
-        // Ekrana Yazdırma
+        // Print to screen
         int mins = remaining / 60;
         int secs = remaining % 60;
-        std::cout << "\r\033[K" << "Kalan Sure: " << std::setfill('0') << std::setw(2) << mins << ":" 
+        std::cout << "\r\033[K" << "Time Remaining: " << std::setfill('0') << std::setw(2) << mins << ":" 
                   << std::setfill('0') << std::setw(2) << secs 
-                  << " | Sifre: " << std::string(inputBuffer.length(), '*') << statusMsg << std::flush;
+                  << " | Password: " << std::string(inputBuffer.length(), '*') << statusMsg << std::flush;
 
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
@@ -189,15 +189,15 @@ int main() {
     setTerminalMode(true);
 #endif
 
-    // Sonuç Durumu Kontrolü
+    // Check the final status
     if (isUnlocked) {
-        std::cout << "\n\nDOGRU SIFRE! KILIT KALDIRILIYOR...\n";
+        std::cout << "\n\nCORRECT PASSWORD! UNLOCKING...\n";
         processFiles(false);
-        std::cout << "Tum dosyalar desifre edildi!\n";
+        std::cout << "All files decrypted!\n";
     } else {
-        std::cout << "\n\nSURE BITTI! KILITLI DOSYALAR GUVENLI SEKILDE SILINIYOR...\n";
+        std::cout << "\n\nTIME IS UP! LOCKED FILES ARE SECURELY DELETED...\n";
         destroyLockedFiles();
-        std::cout << "Tum kilitli dosyalar kalici olarak imha edildi!\n";
+        std::cout << "All locked files have been permanently destroyed!\n";
     }
 
     return 0;
