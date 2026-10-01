@@ -6,8 +6,8 @@
 namespace fs = std::filesystem;
 
 // Kilitli dosyalarınızın bulunduğu Windows klasör yolunu buraya yazın
-const std::string TARGET_PATH = R"(C:\Users\EXCALIBUR\Downloads)";
-const std::string CRYPTO_KEY = "Hizli_XOR_Anahtari_2026";
+const std::string TARGET_PATH = R"(./)";
+const std::string CRYPTO_KEY = "Fast_XOR_Key_2026";
 
 void decryptSingleFile(const fs::path& filePath) {
     std::ifstream inFile(filePath, std::ios::binary);
