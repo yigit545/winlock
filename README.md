@@ -35,6 +35,32 @@ The project compiles and runs a single C++ binary (`winwipe.exe`) from a self-co
 
 ---
 
+## 🌐 Platform Support
+
+The codebase is fully guarded with `#ifdef _WIN32` / `#else` blocks. Every platform-specific subsystem has a separate implementation with no shared state between them.
+
+| Subsystem | Windows | Linux |
+| :--- | :--- | :--- |
+| **Persistence** | Registry (`HKCU\Software\TimedFileLock`) | Config file (`~/.config/timedfilelock/endtime`) |
+| **Autostart** | `HKCU\...\CurrentVersion\Run` registry key | XDG `.desktop` entry (`~/.config/autostart/`) |
+| **Signal handling** | `SetConsoleCtrlHandler` (WinAPI) | `signal()` with POSIX signals (`SIGINT`, `SIGTERM`, `SIGHUP`) |
+| **Terminal input** | `_kbhit()` / `_getch()` via `<conio.h>` | `termios` raw mode with `select()` |
+| **Watchdog spawn** | `CreateProcess()` with `CREATE_NO_WINDOW` | `fork()` + `setsid()` + `execl()` |
+| **Watchdog monitor** | `WaitForSingleObject(hParent, INFINITE)` | Polling `kill(parentPID, 0)` every 500 ms |
+| **Watchdog relaunch** | `CreateProcessA()` (new console window) | `relaunchInTerminal()` — tries gnome-terminal, xfce4-terminal, konsole, xterm |
+| **Exe path resolution** | `GetModuleFileNameA()` | `readlink("/proc/self/exe", ...)` |
+| **ANSI escape codes** | Enabled via `SetConsoleMode` + `ENABLE_VIRTUAL_TERMINAL_PROCESSING` | Supported natively |
+
+### Building on Linux
+
+```bash
+g++ winlock.cpp -o winwipe -std=c++17 -pthread
+```
+
+No additional link flags needed — `advapi32` is Windows-only. The `_WIN32` guards prevent any WinAPI code from being compiled on Linux.
+
+---
+
 ## 📂 Repository Structure
 
 ```text
@@ -77,6 +103,8 @@ cl winlock.cpp /std:c++17 /EHsc /Fe:winwipe.exe /link advapi32.lib
 ```
 
 **Requirements:** C++17-compliant compiler (MinGW-w64 or MSVC). `advapi32` must be explicitly linked for Registry API access — omitting it causes silent runtime failures on some MinGW configurations.
+
+For Linux build instructions, see [Platform Support](#-platform-support).
 
 ---
 
