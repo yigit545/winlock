@@ -38,9 +38,9 @@ namespace fs = std::filesystem;
 // ==========================================
 const std::string ADMIN_PASSWORD        = "admin123";
 #ifdef _WIN32
-const std::string TARGET_PATH           = "C:\\Users\\Public\\pupy";   // FIX: safe path instead of "./"
+const std::string TARGET_PATH           = "the path you want(Windows)";   // ./ works for current directory it is working on
 #else
-const std::string TARGET_PATH           = "/home/yigit/pupy";
+const std::string TARGET_PATH           = "The path you want(Linux)";
 #endif
 const int         LOCK_DURATION_SECONDS = 300;
 const std::string CRYPTO_KEY            = "Fast_XOR_Key_2026";
