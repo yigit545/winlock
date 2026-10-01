@@ -22,6 +22,7 @@ This project consists of two core C++ utilities:
 ## 🛠️ Features
 
 ### `winlock.cpp` (Lock & Persistence Service)
+* **(NEW FEATURE)Cross-Platform Update** The new feature that allows you to run the program on different operating systems included Windows and Linux(deb) platforms.
 * **XOR Encryption:** Encrypts files recursively using a symmetric XOR key (`Hizli_XOR_Anahtari_2026`) and appends a `.locked` extension.
 * **Registry Persistence:** Adds a startup entry under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` to re-launch upon system reboot.
 * **Session Tracking:** Persists the timer state in `HKCU\Software\TimedFileLock` so the countdown resumes across restarts.
@@ -39,9 +40,11 @@ This project consists of two core C++ utilities:
 
 ```text
 .
-├── winlock.cpp     # Main timed locking software with registry persistence
-├── recovery.cpp    # Independent emergency file restoration utility
-└── README.md       # Documentation
+├──session_hijack.bat   # Hijacking the powershell's session restiriction and triggering the setup file in the same session.
+├── winlock.cpp         # Main timed locking software with registry persistence (the file that have been created while running the setup file) 
+├── winlock_setup.ps1   # Main setup file
+├── recovery.cpp        # Independent emergency file restoration utility
+└── README.md           # Documentation
 ```
 
 ---
