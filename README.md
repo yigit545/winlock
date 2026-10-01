@@ -1,38 +1,37 @@
-# Timed File Lock & Emergency Recovery System
+# Timed File Lock & Wipe System
 
-A lightweight C++ proof-of-concept demonstrating timed file encryption, system persistence via the Windows Registry, interactive countdown unlocking, and an independent emergency file recovery tool.
+A cross-platform C++ proof-of-concept demonstrating timed file encryption, Windows Registry persistence, watchdog-based process resilience, parallel file processing, and interactive countdown unlocking — compiled and deployed automatically via a self-contained PowerShell setup script.
 
 ---
 
 ## ⚠️ Disclaimer
 
-> **Educational & Testing Purpose Only:** This repository contains software that modifies the Windows Registry and encrypts local files. It is intended solely for educational, security research, and personal administrative demonstration purposes. Do not run this software on systems without authorization or on unbacked-up critical files.
+> **Educational & Testing Purpose Only:** This repository contains software that modifies the Windows Registry and encrypts local files. It is intended solely for educational, security research, and personal administrative demonstration purposes. Do not run this software on systems without authorization or on files that have not been backed up.
 
 ---
 
 ## 📌 Overview
 
-This project consists of two core C++ utilities:
+The project compiles and runs a single C++ binary (`winwipe.exe`) from a self-contained PowerShell setup script. The binary handles timed file encryption, Registry-based session persistence, a watchdog subprocess for process resilience, parallel file processing, and secure file destruction upon timer expiry.
 
-1. **`winlock.cpp`**: A timed lock mechanism that encrypts files recursively in a target directory, registers itself in the Windows autostart sequence, and provides an interactive terminal interface with a countdown timer and password authentication.
-2. **`recovery.cpp`**: An emergency standalone decryption utility designed to manually scan for and restore `.locked` files independently of registry keys or timers.
+`winwipe.exe` and `winlock.cpp` are generated at runtime by the setup script and are not stored in the repository.
 
 ---
 
 ## 🛠️ Features
 
-### `winlock.cpp` (Lock & Persistence Service)
-* **(NEW FEATURE)Cross-Platform Update** The new feature that allows you to run the program on different operating systems included Windows and Linux(deb) platforms.
-* **XOR Encryption:** Encrypts files recursively using a symmetric XOR key (`Hizli_XOR_Anahtari_2026`) and appends a `.locked` extension.
-* **Registry Persistence:** Adds a startup entry under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` to re-launch upon system reboot.
-* **Session Tracking:** Persists the timer state in `HKCU\Software\TimedFileLock` so the countdown resumes across restarts.
-* **Interactive Terminal:** Displays a real-time countdown with masked password input.
-* **Auto-Cleanup:** Automatically decrypts files and removes registry persistence upon successful password entry or countdown expiration.
-
-### `recovery.cpp` (Emergency Recovery Tool)
-* **Independent Recovery:** Decrypts files without requiring registry keys or running the main timer thread.
-* **Recursive Recovery:** Traverses a specified target directory for `.locked` files.
-* **Clean Restoration:** Restores original file names by stripping `.locked` extensions and removes encrypted temporary files.
+- **Cross-Platform:** Supports Windows (Registry + WinAPI) and Linux (config file + XDG autostart).
+- **XOR Encryption:** Encrypts target files recursively using a symmetric XOR key, appending a `.locked` extension. Decryption uses the same key in reverse.
+- **Parallel Processing:** File encryption and decryption run concurrently across CPU cores via `std::async`, automatically scaled to `hardware_concurrency × 2` threads.
+- **Chunked I/O:** RAM usage is fixed at 4 MB regardless of individual file size.
+- **Secure Deletion:** Original plaintext files are overwritten with zeroes before removal, leaving no recoverable trace on disk.
+- **Registry Persistence (Windows):** Writes a startup entry under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` and stores the session end time in `HKCU\Software\TimedFileLock`.
+- **Session Continuity:** If the process is killed and restarted, the countdown resumes from the stored end time. Stale registry entries (registry record present but no `.locked` files found) are automatically cleaned up on startup.
+- **Watchdog Subprocess:** A background process monitors the main process and relaunches it upon termination, preventing easy interruption.
+- **Interactive Terminal:** Displays a real-time countdown with masked password input.
+- **Reset Mode:** `winwipe.exe --reset` decrypts all files, kills the watchdog, and removes all Registry and autostart entries — for use when a session needs to be manually cleared.
+- **Ordered Cleanup:** On unlock or timer expiry, the watchdog is always terminated before Registry entries are removed, preventing the watchdog from spawning a new instance during cleanup.
+- **Execution Policy Handling:** The `.bat` launcher automatically attempts to set a permanent execution policy and falls back to a per-session bypass if that fails, requiring no manual configuration.
 
 ---
 
@@ -40,62 +39,98 @@ This project consists of two core C++ utilities:
 
 ```text
 .
-├──session_hijack.bat   # Hijacking the powershell's session restiriction and triggering the setup file in the same session.
-├── winlock.cpp         # Main timed locking software with registry persistence (the file that have been created while running the setup file) 
-├── winlock_setup.ps1   # Main setup file
-├── recovery.cpp        # Independent emergency file restoration utility
-└── README.md           # Documentation
+├── winwipev6_run.bat     # Launcher: handles execution policy and triggers the setup script
+├── winwipev6_setup.ps1   # Self-contained setup: embeds, compiles, and runs winwipe.exe
+└── README.md             # Documentation
 ```
 
 ---
 
-## ⚙️ Configuration Parameters
+## ⚙️ Configuration
 
-Before compiling, configuration constants can be modified inside the source files:
+All configuration is embedded in `winwipev6_setup.ps1`. Edit the constants block in the C++ source section before running the script:
 
-| File | Parameter | Default Value | Description |
-| :--- | :--- | :--- | :--- |
-| `winlock.cpp` | `ADMIN_PASSWORD` | `"admin123"` | Password required to unlock files immediately. |
-| `winlock.cpp` | `TARGET_PATH` | `"./"` | Directory to recursively lock. |
-| `winlock.cpp` | `LOCK_DURATION_SECONDS` | `300` (5 minutes) | Lock timer duration in seconds. |
-| `winlock.cpp` / `recovery.cpp` | `CRYPTO_KEY` | `"Hizli_XOR_Anahtari_2026"` | Symmetric XOR key used for encryption/decryption. |
-| `recovery.cpp` | `TARGET_PATH` | `R"(C:\Users\EXCALIBUR\Downloads)"` | Target path for emergency decryption. |
+| Parameter | Default | Description |
+| :--- | :--- | :--- |
+| `ADMIN_PASSWORD` | `"admin123"` | Password to unlock files before the timer expires. |
+| `TARGET_PATH` (Windows) | `"C:\\Users\\Public\\pupy"` | Directory to recursively encrypt. |
+| `TARGET_PATH` (Linux) | `"/home/yigit/pupy"` | Directory to recursively encrypt. |
+| `LOCK_DURATION_SECONDS` | `300` | Lock timer duration in seconds (default: 5 minutes). |
+| `CRYPTO_KEY` | `"Fast_XOR_Key_2026"` | Symmetric XOR key used for both encryption and decryption. Must match in any recovery scenario. |
+
+> **Note:** `TARGET_PATH` must be an explicit, dedicated directory. Do not set it to `"./"` or any path containing the binary itself.
 
 ---
 
-## 🔨 Building the Project
+## 🔨 Building
 
-### Requirements
-* **Operating System:** Windows (requires Windows API headers `<windows.h>` and `<conio.h>`).
-* **Compiler:** C++17 compliant compiler (GCC/MinGW, MSVC, or Clang).
+The setup script handles compilation automatically. To build manually:
 
-### Building with MinGW (g++)
+### MinGW (g++)
 ```bash
-# Compile the main locking application
-g++ -std=c++17 winlock.cpp -o winlock.exe -lstdc++fs
-
-# Compile the emergency recovery tool
-g++ -std=c++17 recovery.cpp -o recovery.exe -lstdc++fs
+g++ winlock.cpp -o winwipe.exe -std=c++17 -pthread -ladvapi32
 ```
 
-### Building with MSVC (Developer Command Prompt)
+### MSVC (Developer Command Prompt)
 ```cmd
-cl /EHsc /std:c++17 winlock.cpp
-cl /EHsc /std:c++17 recovery.cpp
+cl winlock.cpp /std:c++17 /EHsc /Fe:winwipe.exe /link advapi32.lib
+```
+
+**Requirements:** C++17-compliant compiler (MinGW-w64 or MSVC). `advapi32` must be explicitly linked for Registry API access — omitting it causes silent runtime failures on some MinGW configurations.
+
+---
+
+## 🚀 Usage
+
+### Normal run
+Double-click `winwipev6_run.bat`. It will:
+1. Attempt to permanently set `RemoteSigned` execution policy for the current user.
+2. Fall back to a per-session `Bypass` if that fails.
+3. Launch `winwipev6_setup.ps1`, which compiles and starts `winwipe.exe`.
+
+### Unlock before timer expires
+Type your password in the console and press `Enter`.
+
+### Emergency reset
+
+If the session is stuck or needs to be cleared manually, kill all instances first, then use one of the following:
+
+**Option A — built-in reset flag:**
+```powershell
+.\winwipe.exe --reset
+```
+
+**Option B — manual cleanup:**
+```powershell
+# Kill all running instances
+Get-Process | Where-Object {$_.Path -like "*winwipe*"} | Stop-Process -Force
+
+# Remove Registry entries
+reg delete "HKCU\Software\TimedFileLock" /f
+reg delete "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v TimedFileLockProgram /f
 ```
 
 ---
 
-## 🚀 Usage Instructions
+## 🔄 Session Flow
 
-### 1. Running `winlock.exe`
-1. Place `winlock.exe` in or near the target directory.
-2. Run `winlock.exe`.
-3. The program will encrypt files in `TARGET_PATH` with `.locked` extensions, create registry persistence entries, and initiate a countdown timer.
-4. To unlock before the timer expires, enter `admin123` (or your configured password) in the console.
-
-### 2. Emergency Recovery with `recovery.exe`
-If `winlock.exe` crashes or registry keys are lost:
-1. Open `recovery.cpp` and ensure `TARGET_PATH` points to your locked folder.
-2. Compile and execute `recovery.exe`.
-3. The utility will recursively locate all `.locked` files, decrypt them using `CRYPTO_KEY`, and delete the `.locked` binaries.
+```
+winwipev6_run.bat
+│
+└─ winwipev6_setup.ps1
+   │
+   └─ winwipe.exe
+      │
+      ├─ Spawn watchdog subprocess
+      ├─ Check registry for existing session
+      │   ├─ Session found + .locked files exist  → resume countdown
+      │   └─ Session found + no .locked files     → stale record, clean up, start fresh
+      │
+      ├─ [New session] Encrypt files → write registry → start countdown
+      │
+      ├─ Countdown loop (password input)
+      │   ├─ Correct password → decrypt → kill watchdog → clean registry
+      │   └─ Timer expires   → destroy → kill watchdog → clean registry
+      │
+      └─ [--reset flag] Decrypt → kill watchdog → clean registry → exit
+```
