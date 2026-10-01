@@ -79,8 +79,8 @@ All configuration is embedded in `winwipev6_setup.ps1`. Edit the constants block
 | Parameter | Default | Description |
 | :--- | :--- | :--- |
 | `ADMIN_PASSWORD` | `"admin123"` | Password to unlock files before the timer expires. |
-| `TARGET_PATH` (Windows) | `"C:\\Users\\Public\\pupy"` | Directory to recursively encrypt. |
-| `TARGET_PATH` (Linux) | `"/home/yigit/pupy"` | Directory to recursively encrypt. |
+| `TARGET_PATH` (Windows) | `"./"` | Directory to recursively encrypt. |
+| `TARGET_PATH` (Linux) | `"./"` | Directory to recursively encrypt. |
 | `LOCK_DURATION_SECONDS` | `300` | Lock timer duration in seconds (default: 5 minutes). |
 | `CRYPTO_KEY` | `"Fast_XOR_Key_2026"` | Symmetric XOR key used for both encryption and decryption. Must match in any recovery scenario. |
 
