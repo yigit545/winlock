@@ -1,3 +1,6 @@
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+![C++](https://img.shields.io/badge/C%2B%2B-17%2B-00599C?logo=c%2B%2B&logoColor=white)
+![Platform](https://img.shields.io/badge/Platform-Windows-0078D6?logo=windows&logoColor=white)
 # Timed File Lock & Wipe System
 
 A cross-platform C++ proof-of-concept demonstrating timed file encryption, Windows Registry persistence, watchdog-based process resilience, parallel file processing, and interactive countdown unlocking — compiled and deployed automatically via a self-contained PowerShell setup script.
