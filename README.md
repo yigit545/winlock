@@ -4,7 +4,7 @@
 ![Platform](https://img.shields.io/badge/Platform-Linux-FCC624?logo=linux&logoColor=black)
 # Timed File Lock & Wipe System
 
-A cross-platform C++ proof-of-concept demonstrating timed file encryption, Windows Registry persistence, watchdog-based process resilience, parallel file processing, and interactive countdown unlocking — compiled and deployed automatically via a self-contained PowerShell setup script.
+A cross-platform C++ proof-of-concept demonstrating timed file encryption, Windows Registry persistence, watchdog-based process resilience, parallel file processing, and interactive countdown unlocking — compiled and deployed automatically via self-contained PowerShell setup scripts with zero prerequisite installation.
 
 ---
 
@@ -16,14 +16,20 @@ A cross-platform C++ proof-of-concept demonstrating timed file encryption, Windo
 
 ## 📌 Overview
 
-The project compiles and runs a single C++ binary (`winwipe.exe`) from a self-contained PowerShell setup script. The binary handles timed file encryption, Registry-based session persistence, a watchdog subprocess for process resilience, parallel file processing, and secure file destruction upon timer expiry.
+The project consists of two independent C++ utilities, each embedded in its own self-contained PowerShell setup script. No compiler or toolchain needs to be pre-installed — the setup scripts detect, install, or download one automatically.
 
-`winwipe.exe` and `winlock.cpp` are generated at runtime by the setup script and are not stored in the repository.
+| Binary | Script | Purpose |
+| :--- | :--- | :--- |
+| `winwipe.exe` | `winwipev6_setup.ps1` | Timed file lock with Registry persistence, watchdog, and countdown |
+| `recovery.exe` | `recovery_setup.ps1` | Standalone decryption — no registry or timer required |
+
+Both binaries are generated at runtime and are not stored in the repository.
 
 ---
 
 ## 🛠️ Features
 
+### Lock (`winwipe.exe`)
 - **Cross-Platform:** Supports Windows (Registry + WinAPI) and Linux (config file + XDG autostart).
 - **XOR Encryption:** Encrypts target files recursively using a symmetric XOR key, appending a `.locked` extension. Decryption uses the same key in reverse.
 - **Parallel Processing:** File encryption and decryption run concurrently across CPU cores via `std::async`, automatically scaled to `hardware_concurrency × 2` threads.
@@ -33,9 +39,23 @@ The project compiles and runs a single C++ binary (`winwipe.exe`) from a self-co
 - **Session Continuity:** If the process is killed and restarted, the countdown resumes from the stored end time. Stale registry entries (registry record present but no `.locked` files found) are automatically cleaned up on startup.
 - **Watchdog Subprocess:** A background process monitors the main process and relaunches it upon termination, preventing easy interruption.
 - **Interactive Terminal:** Displays a real-time countdown with masked password input.
-- **Reset Mode:** `winwipe.exe --reset` decrypts all files, kills the watchdog, and removes all Registry and autostart entries — for use when a session needs to be manually cleared.
+- **Reset Mode:** `winwipe.exe --reset` decrypts all files, kills the watchdog, and removes all Registry and autostart entries.
 - **Ordered Cleanup:** On unlock or timer expiry, the watchdog is always terminated before Registry entries are removed, preventing the watchdog from spawning a new instance during cleanup.
-- **Execution Policy Handling:** The `.bat` launcher automatically attempts to set a permanent execution policy and falls back to a per-session bypass if that fails, requiring no manual configuration.
+
+### Recovery (`recovery.exe`)
+- **Independent Operation:** Decrypts files without requiring Registry keys, timers, or the main lock process.
+- **Parallel Recovery:** Same `std::async` multi-threaded engine as the lock tool.
+- **Thread-Safe Output:** Per-file status lines (`[OK]`, `[SKIP]`, `[FAIL]`) are printed safely across threads via `std::mutex`.
+- **Secure Cleanup:** After successful decryption, the `.locked` source file is securely wiped with zeroes before removal.
+- **Partial Failure Handling:** If an I/O error occurs mid-decryption, the incomplete output file is removed and the error is reported without affecting other files.
+
+### Setup Scripts (both)
+- **Hybrid Compiler Detection:** No pre-installed toolchain required. Each setup script finds or installs a compiler automatically using a four-stage fallback:
+  1. System `g++` (MinGW/GCC on PATH)
+  2. System `cl.exe` (MSVC)
+  3. Portable MinGW placed next to the script (`mingw-portable\mingw64\bin\g++.exe`)
+  4. Automatic installation: `winget` → Chocolatey → direct zip download (~80 MB from winlibs)
+- **Execution Policy Handling:** The `.bat` launcher sets `RemoteSigned` policy permanently for the current user, falling back to a per-session `Bypass` if that fails.
 
 ---
 
@@ -55,13 +75,7 @@ The codebase is fully guarded with `#ifdef _WIN32` / `#else` blocks. Every platf
 | **Exe path resolution** | `GetModuleFileNameA()` | `readlink("/proc/self/exe", ...)` |
 | **ANSI escape codes** | Enabled via `SetConsoleMode` + `ENABLE_VIRTUAL_TERMINAL_PROCESSING` | Supported natively |
 
-### Building on Linux
-
-```bash
-g++ winlock.cpp -o winwipe -std=c++17 -pthread
-```
-
-No additional link flags needed — `advapi32` is Windows-only. The `_WIN32` guards prevent any WinAPI code from being compiled on Linux.
+> `recovery.exe` is Windows-only by design — its ANSI block is the only platform-guarded section. It requires no WinAPI beyond console setup.
 
 ---
 
@@ -69,24 +83,38 @@ No additional link flags needed — `advapi32` is Windows-only. The `_WIN32` gua
 
 ```text
 .
-├── winwipev6_run.bat     # Launcher: handles execution policy and triggers the setup script
-├── winwipev6_setup.ps1   # Self-contained setup: embeds, compiles, and runs winwipe.exe
+├── winwipev6_run.bat     # Launcher for winwipe: handles execution policy, triggers setup
+├── winwipev6_setup.ps1   # Embeds, compiles, and runs winwipe.exe
+├── recovery_run.bat      # Launcher for recovery: same policy handling as winwipe launcher
+├── recovery_setup.ps1    # Embeds, compiles, and runs recovery.exe
 └── README.md             # Documentation
 ```
+
+> If `mingw-portable\mingw64\` is placed next to the `.ps1` files, the compiler download step is skipped entirely — enabling fully offline operation.
 
 ---
 
 ## ⚙️ Configuration
 
-All configuration is embedded in `winwipev6_setup.ps1`. Edit the constants block in the C++ source section before running the script:
+Constants are embedded in the C++ source block inside each setup script. Edit them before running:
+
+### `winwipev6_setup.ps1`
 
 | Parameter | Default | Description |
 | :--- | :--- | :--- |
 | `ADMIN_PASSWORD` | `"admin123"` | Password to unlock files before the timer expires. |
-| `TARGET_PATH` (Windows) | `"./"` | Directory to recursively encrypt. |
-| `TARGET_PATH` (Linux) | `"./"` | Directory to recursively encrypt. |
+| `TARGET_PATH` (Windows) | `"C:\\Users\\Public\\pupy"` | Directory to recursively encrypt. |
+| `TARGET_PATH` (Linux) | `"/home/yigit/pupy"` | Directory to recursively encrypt. |
 | `LOCK_DURATION_SECONDS` | `300` | Lock timer duration in seconds (default: 5 minutes). |
-| `CRYPTO_KEY` | `"Fast_XOR_Key_2026"` | Symmetric XOR key used for both encryption and decryption. Must match in any recovery scenario. |
+| `CRYPTO_KEY` | `"Fast_XOR_Key_2026"` | Symmetric XOR key. Must match `recovery_setup.ps1`. |
+
+### `recovery_setup.ps1`
+
+| Parameter | Default | Description |
+| :--- | :--- | :--- |
+| `TARGET_PATH` (Windows) | `"C:\\Users\\Public\\pupy"` | Directory to scan for `.locked` files. |
+| `TARGET_PATH` (Linux) | `"/home/yigit/pupy"` | Directory to scan for `.locked` files. |
+| `CRYPTO_KEY` | `"Fast_XOR_Key_2026"` | Must match the value used during encryption. |
 
 > **Note:** `TARGET_PATH` must be an explicit, dedicated directory. Do not set it to `"./"` or any path containing the binary itself.
 
@@ -94,75 +122,115 @@ All configuration is embedded in `winwipev6_setup.ps1`. Edit the constants block
 
 ## 🔨 Building
 
-The setup script handles compilation automatically. To build manually:
+The setup scripts handle compilation automatically through the hybrid detection pipeline. To build manually:
 
-### MinGW (g++)
+### `winwipe` — MinGW (g++)
 ```bash
 g++ winlock.cpp -o winwipe.exe -std=c++17 -pthread -ladvapi32
 ```
 
-### MSVC (Developer Command Prompt)
+### `winwipe` — MSVC
 ```cmd
 cl winlock.cpp /std:c++17 /EHsc /Fe:winwipe.exe /link advapi32.lib
 ```
 
-**Requirements:** C++17-compliant compiler (MinGW-w64 or MSVC). `advapi32` must be explicitly linked for Registry API access — omitting it causes silent runtime failures on some MinGW configurations.
+### `recovery` — MinGW (g++)
+```bash
+g++ recovery.cpp -o recovery.exe -std=c++17 -pthread
+```
 
-For Linux build instructions, see [Platform Support](#-platform-support).
+### `recovery` — MSVC
+```cmd
+cl recovery.cpp /std:c++17 /EHsc /Fe:recovery.exe
+```
+
+### Linux (`winwipe` only)
+```bash
+g++ winlock.cpp -o winwipe -std=c++17 -pthread
+```
+
+> `advapi32` is Windows-only and must be explicitly linked for Registry API access — omitting it causes silent runtime failures on some MinGW configurations. `recovery` does not use the Registry and requires no extra link flags.
 
 ---
 
 ## 🚀 Usage
 
-### Normal run
-Double-click `winwipev6_run.bat`. It will:
-1. Attempt to permanently set `RemoteSigned` execution policy for the current user.
-2. Fall back to a per-session `Bypass` if that fails.
-3. Launch `winwipev6_setup.ps1`, which compiles and starts `winwipe.exe`.
+### Lock (winwipe)
+Double-click `winwipev6_run.bat`. The script will find or install a compiler, build `winwipe.exe`, and launch it. Once running:
+- Files in `TARGET_PATH` are encrypted and the countdown begins.
+- Type the password and press `Enter` to unlock before the timer expires.
+- On expiry, locked files are permanently destroyed.
 
-### Unlock before timer expires
-Type your password in the console and press `Enter`.
+### Recovery
+Double-click `recovery_run.bat`. The script will build and run `recovery.exe`, which:
+- Scans `TARGET_PATH` recursively for `.locked` files.
+- Decrypts each file in parallel and reports per-file status.
+- Securely wipes the `.locked` source after successful restoration.
 
-### Emergency reset
+### Emergency reset (winwipe stuck)
 
-If the session is stuck or needs to be cleared manually, kill all instances first, then use one of the following:
-
-**Option A — built-in reset flag:**
+**Option A — built-in flag:**
 ```powershell
 .\winwipe.exe --reset
 ```
 
 **Option B — manual cleanup:**
 ```powershell
-# Kill all running instances
 Get-Process | Where-Object {$_.Path -like "*winwipe*"} | Stop-Process -Force
-
-# Remove Registry entries
 reg delete "HKCU\Software\TimedFileLock" /f
 reg delete "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v TimedFileLockProgram /f
 ```
 
 ---
 
-## 🔄 Session Flow
+## 🔄 Flow Diagrams
 
+### Lock flow
 ```
 winwipev6_run.bat
 │
-└─ winwipev6_setup.ps1
+├─ Set RemoteSigned policy (permanent) → success
+└─ Fallback: Bypass (this session only)
    │
-   └─ winwipe.exe
+   └─ winwipev6_setup.ps1
       │
-      ├─ Spawn watchdog subprocess
-      ├─ Check registry for existing session
-      │   ├─ Session found + .locked files exist  → resume countdown
-      │   └─ Session found + no .locked files     → stale record, clean up, start fresh
+      ├─ [1/4] Write winlock.cpp to disk
+      ├─ [2/4] Find compiler:
+      │         system g++ → system cl → portable g++ → install (winget/choco/download)
+      ├─ [3/4] Compile → winwipe.exe
+      └─ [4/4] Launch winwipe.exe
+               │
+               ├─ Spawn watchdog subprocess
+               ├─ Check registry:
+               │   ├─ Session + .locked files  → resume countdown
+               │   └─ Session + no .locked     → stale record, reset
+               │
+               ├─ [New] Encrypt → write registry → countdown
+               │
+               ├─ Password correct → decrypt → kill watchdog → clean registry
+               ├─ Timer expires   → destroy  → kill watchdog → clean registry
+               └─ --reset flag    → decrypt  → kill watchdog → clean registry → exit
+```
+
+### Recovery flow
+```
+recovery_run.bat
+│
+├─ Set RemoteSigned policy (permanent) → success
+└─ Fallback: Bypass (this session only)
+   │
+   └─ recovery_setup.ps1
       │
-      ├─ [New session] Encrypt files → write registry → start countdown
-      │
-      ├─ Countdown loop (password input)
-      │   ├─ Correct password → decrypt → kill watchdog → clean registry
-      │   └─ Timer expires   → destroy → kill watchdog → clean registry
-      │
-      └─ [--reset flag] Decrypt → kill watchdog → clean registry → exit
+      ├─ [1/4] Write recovery.cpp to disk
+      ├─ [2/4] Find compiler:
+      │         system g++ → system cl → portable g++ → install (winget/choco/download)
+      ├─ [3/4] Compile → recovery.exe
+      └─ [4/4] Launch recovery.exe
+               │
+               ├─ Scan TARGET_PATH for .locked files
+               ├─ Decrypt each file in parallel (std::async)
+               │   ├─ [OK]   → secureDelete .locked source
+               │   ├─ [SKIP] → cannot open / write
+               │   └─ [FAIL] → I/O error, partial output removed
+               └─ Report complete
 ```
