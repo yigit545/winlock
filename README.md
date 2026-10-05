@@ -238,7 +238,7 @@ recovery_run.bat
 ```
 ## License
 
-Copyright © 2026 Yiğit
+Copyright © 2026 Yiğit Erim Özdamar
 
 This project is licensed under the **PolyForm Noncommercial License 1.0.0**.
 
