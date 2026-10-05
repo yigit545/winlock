@@ -1,4 +1,4 @@
-[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+[![License:PolyForm Noncommercial License 1.0.0.](https://polyformproject.org/licenses/noncommercial/1.0.0?utm_source=chatgpt.com)
 ![C++](https://img.shields.io/badge/C%2B%2B-17%2B-00599C?logo=c%2B%2B&logoColor=white)
 ![Platform](https://img.shields.io/badge/Platform-Windows-0078D6?logo=windows&logoColor=white)
 ![Platform](https://img.shields.io/badge/Platform-Linux-FCC624?logo=linux&logoColor=black)
@@ -234,3 +234,17 @@ recovery_run.bat
                │   └─ [FAIL] → I/O error, partial output removed
                └─ Report complete
 ```
+## License
+
+Copyright © 2026 Yiğit
+
+This project is licensed under the **PolyForm Noncommercial License 1.0.0**.
+
+You may inspect, study, modify, and use this software for **personal, educational, research, testing, and other non-commercial purposes**, subject to the terms of the license.
+
+**Commercial use is not permitted without explicit permission from the copyright holder.**
+
+For commercial licensing or permission, please contact the copyright holder.
+
+License:
+https://polyformproject.org/licenses/noncommercial/1.0.0
