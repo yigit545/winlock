@@ -32,6 +32,24 @@
     #include <conio.h>
     #include <wincrypt.h>
     #include <winternl.h>   // [H-WIN-1] NtSetInformationProcess
+    #ifndef ProcessHeapTerminateOnCorruptionPolicy
+    #define ProcessHeapTerminateOnCorruptionPolicy (PROCESS_MITIGATION_POLICY)11
+    #endif
+    // Yalnızca eksik olabilecek heap koruma struct tanımı
+    #ifndef _PROCESS_MITIGATION_HEAP_TERMINATE_ON_CORRUPTION_POLICY_DEFINED
+    #define _PROCESS_MITIGATION_HEAP_TERMINATE_ON_CORRUPTION_POLICY_DEFINED
+    typedef struct _PROCESS_MITIGATION_HEAP_TERMINATE_ON_CORRUPTION_POLICY_CUSTOM {
+        union {
+            DWORD Flags;
+            struct {
+                DWORD HeapTerminateOnCorruption : 1;
+                DWORD ReservedFlags : 31;
+            };
+        };
+    } PROCESS_MITIGATION_HEAP_TERMINATE_ON_CORRUPTION_POLICY_CUSTOM;
+    #define PROCESS_MITIGATION_HEAP_TERMINATE_ON_CORRUPTION_POLICY PROCESS_MITIGATION_HEAP_TERMINATE_ON_CORRUPTION_POLICY_CUSTOM
+    #endif
+
     #pragma comment(lib, "advapi32.lib")
     #pragma comment(lib, "crypt32.lib")
     #pragma comment(lib, "ntdll.lib")
