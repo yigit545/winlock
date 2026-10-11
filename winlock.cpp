@@ -598,4 +598,3 @@ int main(int argc, char* argv[]) {
     std::this_thread::sleep_for(std::chrono::seconds(3));
     return 0;
 }
-Remove-Item winlock.cpp -ErrorAction SilentlyContinue
