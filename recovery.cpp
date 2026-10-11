@@ -1,4 +1,4 @@
-// recovery.cpp — standalone .locked file decryption tool
+// recovery.cpp — standalone .locked file decryption tool (Updated)
 #include <iostream>
 #include <fstream>
 #include <filesystem>
@@ -15,32 +15,39 @@
 namespace fs = std::filesystem;
 
 // ==========================================
-// Constants — must match winwipe settings
+// Constants — must match winlock settings
 // ==========================================
 #ifdef _WIN32
-const std::string TARGET_PATH = R"./";
+const std::string TARGET_PATH = fs::current_path().string();   // ./ works for current directory it is working on";
 #else
-const std::string TARGET_PATH = "./";
+static std::string resolveHome() {
+    const char* h = getenv("HOME");
+    return h ? std::string(h) : std::string("/tmp");
+}
+const std::string TARGET_PATH = resolveHome() + "./";
 #endif
+
 const std::string CRYPTO_KEY = "Fast_XOR_Key_2026";
 // ==========================================
 
 static std::mutex g_consoleMtx;
 
 
-// ── Secure deletion ───────────────────────────────────────────────────────
+// ── Secure deletion — 3-pass (winlockv2 compatible) ───────────────────────
 bool secureDelete(const fs::path& filePath) {
     std::error_code ec;
     uintmax_t fileSize = fs::file_size(filePath, ec);
     if (!ec && fileSize > 0) {
-        std::ofstream file(filePath, std::ios::binary | std::ios::in | std::ios::out);
-        if (file.is_open()) {
+        const unsigned char patterns[3] = {0x00, 0xFF, 0xA5};
+        for (int pass = 0; pass < 3; ++pass) {
+            std::ofstream file(filePath, std::ios::binary | std::ios::in | std::ios::out);
+            if (!file.is_open()) break;
             constexpr size_t BLOCK_SIZE = 4096;
-            std::vector<char> zeroBuffer(BLOCK_SIZE, 0);
+            std::vector<char> buf(BLOCK_SIZE, (char)patterns[pass]);
             uintmax_t written = 0;
             while (written < fileSize) {
-                uintmax_t toWrite = std::min((uintmax_t)zeroBuffer.size(), fileSize - written);
-                file.write(zeroBuffer.data(), toWrite);
+                uintmax_t toWrite = std::min((uintmax_t)buf.size(), fileSize - written);
+                file.write(buf.data(), (std::streamsize)toWrite);
                 written += toWrite;
             }
             file.flush();
@@ -71,7 +78,6 @@ void recoverSingleFile(const fs::path& lockedPath) {
         return;
     }
 
-    // Fixed 4 MB RAM — chunked I/O
     constexpr size_t BUFFER_SIZE = 4 * 1024 * 1024;
     std::vector<char> buffer(BUFFER_SIZE);
 
@@ -91,7 +97,6 @@ void recoverSingleFile(const fs::path& lockedPath) {
 
         outFile.write(buffer.data(), bytesRead);
 
-        // On I/O error abort and clean up partial output file
         if (!outFile) {
             inFile.close();
             outFile.close();
@@ -102,10 +107,11 @@ void recoverSingleFile(const fs::path& lockedPath) {
         }
     }
 
+    outFile.flush();
     inFile.close();
     outFile.close();
 
-    // Securely wipe the .locked file after successful decryption
+    // Securely wipe the .locked file using 3-pass deletion
     secureDelete(lockedPath);
 
     std::lock_guard<std::mutex> lock(g_consoleMtx);
@@ -121,7 +127,6 @@ void recoverAll(const fs::path& targetPath) {
         return;
     }
 
-    // Collect all .locked files before processing
     std::vector<fs::path> targets;
     auto options = fs::directory_options::skip_permission_denied;
     for (const auto& entry : fs::recursive_directory_iterator(targetPath, options, ec)) {
@@ -156,7 +161,6 @@ void recoverAll(const fs::path& targetPath) {
         );
     }
 
-    // Wait for all remaining threads
     for (auto& f : futures) {
         if (f.valid()) { try { f.get(); } catch (...) {} }
     }
@@ -166,7 +170,6 @@ void recoverAll(const fs::path& targetPath) {
 // ── Main ──────────────────────────────────────────────────────────────────
 int main() {
 #ifdef _WIN32
-    // Enable ANSI escape code support
     HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
     if (hOut != INVALID_HANDLE_VALUE) {
         DWORD mode = 0;
