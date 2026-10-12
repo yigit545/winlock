@@ -619,22 +619,43 @@ void destroyLockedFiles(const fs::path& targetPath) {
     std::error_code ec;
     if (!fs::exists(targetPath, ec)) return;
     std::vector<fs::path> targets;
-    for (const auto& entry : fs::recursive_directory_iterator(targetPath, ec)) {
-        if (ec) { ec.clear(); continue; }
-        if (!entry.is_regular_file()) continue;
-        if (entry.path().extension() == ".locked")
-            targets.push_back(entry.path());
+
+    auto options = fs::directory_options::skip_permission_denied;
+    auto it = fs::recursive_directory_iterator(targetPath, options, ec);
+    auto end = fs::recursive_directory_iterator();
+
+    while (it != end) {
+        if (ec) { ec.clear(); it.increment(ec); continue; }
+        try {
+            const auto& entry = *it;
+            if (entry.is_regular_file(ec) && !ec) {
+                if (entry.path().extension() == ".locked")
+                    targets.push_back(entry.path());
+            }
+        } catch (...) {}
+        it.increment(ec);
     }
+
     for (const auto& path : targets) secureDelete(path);
 }
 
 bool hasLockedFiles(const fs::path& targetPath) {
     std::error_code ec;
     if (!fs::exists(targetPath, ec)) return false;
-    for (const auto& entry : fs::recursive_directory_iterator(targetPath, ec)) {
-        if (ec) { ec.clear(); continue; }
-        if (!entry.is_regular_file()) continue;
-        if (entry.path().extension() == ".locked") return true;
+
+    auto options = fs::directory_options::skip_permission_denied;
+    auto it = fs::recursive_directory_iterator(targetPath, options, ec);
+    auto end = fs::recursive_directory_iterator();
+
+    while (it != end) {
+        if (ec) { ec.clear(); it.increment(ec); continue; }
+        try {
+            const auto& entry = *it;
+            if (entry.is_regular_file(ec) && !ec) {
+                if (entry.path().extension() == ".locked") return true;
+            }
+        } catch (...) {}
+        it.increment(ec);
     }
     return false;
 }
