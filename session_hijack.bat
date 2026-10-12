@@ -2,10 +2,10 @@
 chcp 65001 >nul
 setlocal
 
-set "PS1=%~dp0winwipev6_setup.ps1"
+set "PS1=%~dp0winlock_setup.ps1"
 
 if not exist "%PS1%" (
-    echo [HATA] winwipev6_setup.ps1 bulunamadi.
+    echo [HATA] winlock_setup.ps1 bulunamadi.
     echo        Bu dosya ile ayni klasorde olmali.
     pause
     exit /b 1
