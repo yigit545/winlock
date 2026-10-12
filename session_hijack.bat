@@ -5,31 +5,20 @@ setlocal
 set "PS1=%~dp0winlock_setup.ps1"
 
 if not exist "%PS1%" (
-    echo [HATA] winwlock_setup.ps1 bulunamadi.
+    echo [HATA] winlock_setup.ps1 bulunamadi.
     echo        Bu dosya ile ayni klasorde olmali.
     pause
     exit /b 1
 )
 
-:: Tek satir olarak birlestirilmis guvenli PowerShell komutlari
-powershell -NoProfile -Command "Set-ExecutionPolicy RemoteSigned -Scope CurrentUser -Force" >nul 2>&1
+:: PowerShell politikasini bypass ederek dogrudan calistir
+powershell -NoProfile -ExecutionPolicy Bypass -File "%PS1%"
 
-powershell -NoProfile -Command "if ((Get-ExecutionPolicy -Scope CurrentUser) -in @('RemoteSigned','Unrestricted','Bypass')) { exit 0 } else { exit 1 }" >nul 2>&1
-
-if %ERRORLEVEL% == 0 (
-    powershell -NoProfile -File "%PS1%"
-    goto :done
+if %ERRORLEVEL% NEQ 0 (
+    echo.
+    echo [HATA] Script calistirilirken bir hata olustu.
+    echo        Lutfen dosyaya sag tiklayip "Yonetici olarak calistir" secenegini deneyin.
+    pause
 )
 
-echo [!] Policy kalici ayarlanamadi, bypass ile deneniyor...
-powershell -NoProfile -ExecutionPolicy Bypass -File "%PS1%"
-if %ERRORLEVEL% == 0 goto :done
-
-echo.
-echo [HATA] Script hicbir yontemle calistirilamadi.
-echo        Bu .bat dosyasina sag tikla > "Yonetici olarak calistir" deneyin.
-pause
-exit /b 1
-
-:done
 endlocal
