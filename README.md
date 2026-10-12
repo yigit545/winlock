@@ -7,7 +7,7 @@
 # Timed File Lock & Wipe System
 
 A cross-platform C++ proof-of-concept demonstrating timed file encryption, Windows Registry persistence, watchdog-based process resilience, parallel file processing, and interactive countdown unlocking — compiled and deployed automatically via self-contained PowerShell setup scripts with zero prerequisite installation.
-
+Testing processes are currently running on our experimental environments; such as isolated folders, virtual machines and test devices.
 ---
 
 ## ⚠️ Disclaimer
