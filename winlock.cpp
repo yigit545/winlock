@@ -45,9 +45,9 @@ const std::string ADMIN_PASSWORD_HASH =
     "240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9";
 
 #ifdef _WIN32
-const std::string TARGET_PATH = "./";   // Windows için yol
+const std::string TARGET_PATH = "C:\\Path_example";   // Windows için yol
 #else
-const std::string TARGET_PATH = "/home/yigit/pupy";                     // Linux için doğrudan yol (veya tam yol örn: "/home/yigit/pupy")
+const std::string TARGET_PATH = "/home/path_example"; // Linux için doğrudan yol (veya tam yol örn: "/home/user/dummy")
 #endif
 
 const int         LOCK_DURATION_SECONDS = 300;
