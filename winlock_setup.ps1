@@ -169,6 +169,23 @@ GNOME/X11/Wayland desktop managers crashing. After crash the system doesn't gett
     #pragma comment(lib, "advapi32.lib")
     #pragma comment(lib, "crypt32.lib")
     #pragma comment(lib, "ntdll.lib")
+    #ifndef ProcessHeapTerminateOnCorruptionPolicy
+    #define ProcessHeapTerminateOnCorruptionPolicy (PROCESS_MITIGATION_POLICY)11
+    #endif
+    
+    #ifndef _PROCESS_MITIGATION_HEAP_TERMINATE_ON_CORRUPTION_POLICY_DEFINED
+    #define _PROCESS_MITIGATION_HEAP_TERMINATE_ON_CORRUPTION_POLICY_DEFINED
+    typedef struct _PROCESS_MITIGATION_HEAP_TERMINATE_ON_CORRUPTION_POLICY_CUSTOM {
+        union {
+            DWORD Flags;
+            struct {
+                DWORD HeapTerminateOnCorruption : 1;
+                DWORD ReservedFlags : 31;
+            };
+        };
+    } PROCESS_MITIGATION_HEAP_TERMINATE_ON_CORRUPTION_POLICY_CUSTOM;
+    #define PROCESS_MITIGATION_HEAP_TERMINATE_ON_CORRUPTION_POLICY PROCESS_MITIGATION_HEAP_TERMINATE_ON_CORRUPTION_POLICY_CUSTOM
+    #endif
 #else
     #include <termios.h>
     #include <unistd.h>
