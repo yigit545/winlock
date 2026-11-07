@@ -248,12 +248,12 @@ reg delete "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v TimedFileLock
 
 ### Lock flow
 ```
-winwipev6_run.bat
+session_elevate.bat
 │
 ├─ Set RemoteSigned policy (permanent) → success
 └─ Fallback: Bypass (this session only)
    │
-   └─ winwipev6_setup.ps1
+   └─ winlock_setup.ps1
       │
       ├─ [1/4] Write winlock.cpp to disk
       ├─ [2/4] Find compiler:
