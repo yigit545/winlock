@@ -47,7 +47,7 @@ Both binaries are generated at runtime and are not stored in the repository.
 
 ## 🛠️ Features
 
-### Lock (`winwlock.exe`)
+### Lock (`winlock.exe`)
 
 - **Cross-Platform:** Supports Windows (Registry + WinAPI) and Linux (config file + XDG autostart).
 - **AES-256-GCM Encryption:** Encrypts target files recursively using AES-256-GCM with a per-file randomly generated 96-bit IV/nonce and a 128-bit authentication tag. Each encrypted file is stored as `[12-byte IV][ciphertext][16-byte GCM tag]`. The GCM authentication tag ensures both confidentiality and integrity — tampered or corrupted files are rejected at decryption.
