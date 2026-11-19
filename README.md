@@ -159,7 +159,7 @@ The codebase is fully guarded with `#ifdef _WIN32` / `#else` blocks. Every platf
 
 Constants are embedded in the C++ source block inside each setup script. Edit them before running:
 
-### `winwipev6_setup.ps1`
+### `winlock_setup.ps1`
 
 | Parameter | Default | Description |
 | :--- | :--- | :--- |
@@ -172,7 +172,7 @@ Constants are embedded in the C++ source block inside each setup script. Edit th
 
 | Parameter | Default | Description |
 | :--- | :--- | :--- |
-| `ADMIN_PASSWORD_HASH` | *(must match `winwipev6_setup.ps1`)* | SHA-256 hex digest — must match the value used during encryption. |
+| `ADMIN_PASSWORD_HASH` | *(must match `winwlock_setup.ps1`)* | SHA-256 hex digest — must match the value used during encryption. |
 | `TARGET_PATH` (Windows) | *(same as above)* | Directory to scan for `.locked` files. |
 | `TARGET_PATH` (Linux) | *(same as above)* | Directory to scan for `.locked` files. |
 
@@ -216,7 +216,7 @@ g++ winlock.cpp -o winwipe -std=c++17 -pthread
 ## 🚀 Usage
 
 ### Lock (winwipe)
-Double-click `winwipev6_run.bat`. The script will find or install a compiler, build `winwipe.exe`, and launch it. Once running:
+Double-click `session_elevate.bat`. The script will find or install a compiler, build `winlock.exe`, and launch it. Once running:
 - Files in `TARGET_PATH` are encrypted with AES-256-GCM and the countdown begins.
 - Type the password and press `Enter` to unlock before the timer expires.
 - On expiry, locked files are permanently destroyed using the filesystem-aware secure deletion strategy.
