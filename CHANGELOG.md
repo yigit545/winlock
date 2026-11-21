@@ -1,14 +1,25 @@
 # Changelog
 
-All notable changes, architectural improvements, and security enhancements for the Timed File Lock & Wipe System project are documented below.
+All notable changes, architectural improvements, and security enhancements for the Winlock research project are documented below.
+
+---
+
+## [v4.0] - 2026-11
+### Research Reorientation & Repository Restructuring
+* **Academic Framing:** Project reoriented toward ransomware behavioral analysis and detection research. The controlled implementation now serves as a research subject for signature extraction and detection rule development.
+* **Branch Separation:** Repository restructured into two branches:
+  * `main` — detection research artifacts (YARA/Sigma rules, behavioral analysis, recovery module)
+  * `experimental` — controlled implementation, restricted to authorized research access
+* **README Overhaul:** Documentation updated to reflect the detection research methodology, comparative analysis approach (WannaCry, NotPetya, Petya), and TÜBİTAK 2204-A research goals.
+* **Detection Methodology:** Established behavioral signature extraction pipeline using `inotifywait`, `strace`, `auditd` (Linux) and Sysmon/ETW (Windows). Key metrics: file velocity, Shannon entropy delta, syscall profile, shadow copy behavior.
 
 ---
 
 ## [v3.0] - 2026-10
 ### Added & Merged
-* **Filesystem & Storage-Aware Secure Delete Matrix:** Refined the `secureDelete` mechanism to automatically adapt its overwrite and wipe strategies based on storage medium and file system structure:
+* **Filesystem & Storage-Aware Secure Delete Matrix:** Refined the `secureDelete` mechanism to automatically adapt its overwrite and wipe strategies based on storage medium and filesystem structure:
   * **Linux:** Differentiates between NVMe/SSD, HDD, RAM (`tmpfs`), and network storage (`NFS`/`CIFS`). Uses `FITRIM` for CoW filesystems (`btrfs`, `ZFS`), single-pass zero-fill + `FITRIM` for SSDs, and 3-pass DoD standard overwrites (0x00 / 0xFF / 0xA5) for traditional HDDs.
-  * **Windows:** Inspects drive type via `DeviceIoControl` seek penalty queries and volume file system type (`ReFS`, `NTFS`, `exFAT`/`FAT32`). Applies TRIM IOCTLs for SSD/ReFS and 3-pass overwrites for HDDs and legacy FAT structures.
+  * **Windows:** Inspects drive type via `DeviceIoControl` seek penalty queries and volume filesystem type (`ReFS`, `NTFS`, `exFAT`/`FAT32`). Applies TRIM IOCTLs for SSD/ReFS and 3-pass overwrites for HDDs and legacy FAT structures.
 * **Unified Cross-Platform Home Resolver:** Integrated a robust `resolveHome()` function handling both Windows (`USERPROFILE`) and Linux (`HOME`) environment variables.
 
 ---
@@ -24,7 +35,7 @@ All notable changes, architectural improvements, and security enhancements for t
 ### Security Enhancements
 * **AES-256-GCM Migration:** Replaced simple XOR encryption with authenticated, per-file random IV/nonce-based **AES-256-GCM**:
   * *Windows:* Utilizes native `BCrypt` API with hardware AES-NI acceleration.
-  * *Linux:* Implemented a zero-dependency C++ AES-256-GCM engine.
+  * *Linux:* Implemented a zero-dependency pure C++ AES-256-GCM engine (FIPS 197 / NIST SP 800-38D compliant).
 * **Storage Type Detection:** Enriched disk wiping logic by querying `/sys/block/<dev>/queue/rotational` (Linux) and storage seek penalties (Windows) to distinguish SSDs from HDDs.
 * **Shell Injection Prevention:** Replaced `system()` calls in terminal relaunch routines with `execvp()` using structured argument arrays.
 
